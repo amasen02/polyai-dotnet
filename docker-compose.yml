@@ -1,0 +1,11 @@
+services:
+  polyai-sample:
+    build:
+      context: .
+      dockerfile: samples/PolyAI.Sample/Dockerfile
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    # Optionally point to a local Ollama instance:
+    # OLLAMA_BASE_URL: http://host.docker.internal:11434

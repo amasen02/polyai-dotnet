@@ -1,0 +1,49 @@
+name: Bug Report
+description: Report a defect in PolyAI.DotNet
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for taking the time to report this bug.
+  - type: input
+    id: version
+    attributes:
+      label: PolyAI.DotNet version
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: provider
+    attributes:
+      label: Provider affected
+      placeholder: "openai / anthropic / gemini / ollama / azure-openai"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear and concise description of the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: The smallest code snippet that triggers the bug.
+      render: csharp
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: .NET version, OS, any relevant config
+    validations:
+      required: false

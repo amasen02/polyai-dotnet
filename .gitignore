@@ -1,0 +1,23 @@
+## .NET
+bin/
+obj/
+*.user
+.vs/
+TestResults/
+*.nupkg
+*.snupkg
+artifacts/
+
+## OS / Editor
+.DS_Store
+Thumbs.db
+*.suo
+*.swp
+.idea/
+*.orig
+*.bak
+
+## Scratch
+.tmp_*
+*.tmp
+scratch/
