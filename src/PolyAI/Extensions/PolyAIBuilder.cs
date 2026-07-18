@@ -77,8 +77,14 @@ public sealed class PolyAIBuilder
             DeploymentName = deploymentName,
         };
         configure?.Invoke(options);
-        AddFactory("azure-openai", sp => new AzureOpenAIProvider(
-            sp.GetRequiredService<IHttpClientFactory>().CreateClient("polyai-azure-openai"), options));
+        AddFactory("azure-openai", _ =>
+        {
+            var handler = new Providers.Azure.AzureAuthHandler(options.ApiKey, options.ApiVersion)
+            {
+                InnerHandler = new HttpClientHandler()
+            };
+            return new AzureOpenAIProvider(new HttpClient(handler), options);
+        });
         _defaultProvider ??= "azure-openai";
         return this;
     }
