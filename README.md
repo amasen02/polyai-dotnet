@@ -194,7 +194,7 @@ ANTHROPIC_API_KEY=sk-ant-... docker compose up
 
 ## Tests
 
-30 xUnit tests covering all providers, the DI wiring, error types, streaming, tool discovery, and structured output deserialization. All tests use `FakeHttpMessageHandler` — no live API calls, no environment variables required.
+34 xUnit tests covering all providers, the DI wiring, error types, streaming, tool discovery, and structured output deserialization. All tests use `FakeHttpMessageHandler` — no live API calls, no environment variables required.
 
 ```bash
 dotnet test
