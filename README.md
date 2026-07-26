@@ -145,9 +145,40 @@ PolyAI.DotNet
 ```
 
 **Extension points:**
-- Add a new provider: implement `ProviderBase`, register via `PolyAIBuilder`.
+- Add a new provider: implement `ProviderBase`, register via `PolyAIBuilder`. Parse the response
+  body through `ProviderBase.ReadChatResponseAsync` — it is the boundary that keeps the error
+  contract below true for your provider too.
 - Custom router: implement `IPolyAIRouter` and register in DI before calling `Build()`.
 - Custom `ChatOptions`: `ChatOptions` is a `sealed class` with nullable properties — extend by subclassing if you need provider-specific extras.
+
+## Error handling
+
+**Every failure this library raises derives from `PolyAIException`**, so one catch block is enough:
+
+```csharp
+try
+{
+    var response = await client.ChatAsync([ChatMessage.User("Hi")]);
+}
+catch (ProviderRateLimitException ex)   // 429 — ex.RetryAfter is the provider's backoff hint
+{
+    await Task.Delay(ex.RetryAfter ?? TimeSpan.FromSeconds(5));
+}
+catch (ProviderAuthException ex)        // 401/403 — the credential is wrong or expired
+{
+    logger.LogError("Check the {Provider} API key", ex.Provider);
+}
+catch (PolyAIException ex)              // everything else, including malformed responses
+{
+    logger.LogError(ex, "Call failed");
+}
+```
+
+That guarantee covers the response body as well as the status code. A provider body is untrusted
+input — a proxy can truncate it, a gateway can return an empty `200`, and a provider can change a
+field's shape — so a body that cannot be read raises a `ProviderException` carrying
+`Provider`, `StatusCode`, and the raw `ResponseBody` for diagnosis, with the underlying parse
+failure preserved as `InnerException`. It never surfaces as a raw `System.Text.Json` exception.
 
 ## Configuration
 

@@ -104,7 +104,7 @@ public sealed class P3_StructuredOutputProbes
     // Malformed top-level response body. JsonNode.Parse throws a raw System.Text.Json
     // JsonException that escapes the PolyAIException hierarchy, so `catch (PolyAIException)`
     // — the documented error-handling contract — does not catch it.
-    [Fact(Skip = "Documented defect: raw System.Text.Json exceptions escape PolyAIException hierarchy. Tracked in GRO d3710e2c.")]
+    [Fact]
     public async Task P3_6_A_malformed_response_body_raises_PolyAIException_not_a_raw_JsonException()
     {
         var provider = new OpenAIProvider(
@@ -120,7 +120,7 @@ public sealed class P3_StructuredOutputProbes
     // ---------------------------------------------------------------- P3.7
     // Same class of defect on Anthropic, via a different mechanism: AsArray() on a
     // non-array node throws InvalidOperationException.
-    [Fact(Skip = "Documented defect: raw System.Text.Json exceptions escape PolyAIException hierarchy. Tracked in GRO d3710e2c.")]
+    [Fact]
     public async Task P3_7_An_unexpected_Anthropic_content_shape_raises_PolyAIException()
     {
         var provider = new AnthropicProvider(
@@ -134,7 +134,7 @@ public sealed class P3_StructuredOutputProbes
 
     // ---------------------------------------------------------------- P3.8
     // A 200 response with an empty body is what a truncated/proxied connection produces.
-    [Fact(Skip = "Documented defect: raw System.Text.Json exceptions escape PolyAIException hierarchy. Tracked in GRO d3710e2c.")]
+    [Fact]
     public async Task P3_8_An_empty_response_body_raises_PolyAIException()
     {
         var provider = new OpenAIProvider(
