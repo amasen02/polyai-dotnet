@@ -4,6 +4,31 @@ All notable changes to `PolyAI.DotNet` are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Gemini `ChatAsync` and `StructuredAsync` could not reach the API.** `BuildEndpoint` appended the
+  API key with `&key=`, but the non-streaming URL never opened a query string, so
+  `generateContent&key=...` became part of the URL *path* and every request resolved to HTTP 404.
+  `StreamAsync` was unaffected — `streamGenerateContent?alt=sse` already opened the query string,
+  which is why the streaming tests passed and hid the defect.
+
+### Security
+
+- **The Gemini API key is no longer placed in the request URL.** It is sent in the `x-goog-api-key`
+  header, so it can no longer leak into `Microsoft.Extensions.Http` request logs or into any proxy
+  along the path.
+- **The Gemini model name is escaped before it enters the URL path.** A caller-supplied model name
+  such as `evil?alt=json&key=leaked` was previously interpolated raw and could inject or override
+  query parameters.
+
+### Added
+
+- `CapturingHandler` test fake plus Gemini wire-format regression tests that assert on the outgoing
+  request URI, headers, and body. The existing `FakeHttpMessageHandler` accepts any URI silently,
+  which is why no shipped test caught the malformed URL.
+
 ## [1.0.0] - 2026-07-18
 
 ### Added
