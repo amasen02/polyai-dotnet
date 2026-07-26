@@ -37,8 +37,7 @@ internal sealed class OllamaProvider : ProviderBase
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, "Ollama ChatAsync").ConfigureAwait(false);
 
-        var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        return ParseChatResponse(json);
+        return await ReadChatResponseAsync(response, ParseChatResponse, cancellationToken).ConfigureAwait(false);
     }
 
     public override async IAsyncEnumerable<string> StreamAsync(
@@ -113,14 +112,13 @@ internal sealed class OllamaProvider : ProviderBase
         return body;
     }
 
-    private static ChatResponse ParseChatResponse(string json)
+    private static ChatResponse ParseChatResponse(JsonNode root)
     {
-        var root = JsonNode.Parse(json);
-        var content = root?["message"]?["content"]?.GetValue<string>() ?? string.Empty;
-        var model = root?["model"]?.GetValue<string>();
+        var content = root["message"]?["content"]?.GetValue<string>() ?? string.Empty;
+        var model = root["model"]?.GetValue<string>();
 
-        int? promptTokens = root?["prompt_eval_count"]?.GetValue<int>();
-        int? completionTokens = root?["eval_count"]?.GetValue<int>();
+        int? promptTokens = root["prompt_eval_count"]?.GetValue<int>();
+        int? completionTokens = root["eval_count"]?.GetValue<int>();
         TokenUsage? usage = promptTokens.HasValue && completionTokens.HasValue
             ? new TokenUsage(promptTokens.Value, completionTokens.Value)
             : null;

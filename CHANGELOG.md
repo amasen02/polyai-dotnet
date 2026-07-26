@@ -8,6 +8,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
+- **A malformed provider response no longer escapes the `PolyAIException` contract.** Every provider
+  parsed the response body with an unguarded `JsonNode.Parse`, so a truncated body, an empty `200`
+  from a proxy, or an unexpected field shape surfaced as a raw `System.Text.Json.JsonReaderException`
+  (or, on Anthropic, an `InvalidOperationException` from `AsArray()`). Callers following the
+  documented `catch (PolyAIException)` contract missed it entirely and the process took an unhandled
+  exception. Response parsing now runs behind a single boundary,
+  `ProviderBase.ReadChatResponseAsync`, which raises a `ProviderException` carrying the provider,
+  status code, and raw `ResponseBody`, with the original parse failure as `InnerException`.
+  `StructuredAsync` already did this for its own deserialization step; the top-level response parse
+  never got the same treatment.
+- **An unexpected `content`/`parts` shape is reported instead of read as empty.** Anthropic
+  `content` and Gemini `candidates[0].content.parts` are now shape-checked: a value that is present
+  but is not a JSON array raises a `ProviderException` naming the field and the expected shape.
+  Legitimate absence is unchanged — an Anthropic response with no `content` block, and a Gemini
+  candidate stopped by a safety filter, both still read as an empty message.
 - **Gemini `ChatAsync` and `StructuredAsync` could not reach the API.** `BuildEndpoint` appended the
   API key with `&key=`, but the non-streaming URL never opened a query string, so
   `generateContent&key=...` became part of the URL *path* and every request resolved to HTTP 404.
@@ -28,6 +43,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - `CapturingHandler` test fake plus Gemini wire-format regression tests that assert on the outgoing
   request URI, headers, and body. The existing `FakeHttpMessageHandler` accepts any URI silently,
   which is why no shipped test caught the malformed URL.
+- An **Error handling** section in the README documenting the `PolyAIException` contract, and
+  `MalformedResponseTests` covering every provider against a truncated body, an empty `200`, a
+  `null` body, a missing `choices` entry, and a wrong-shaped `content`/`parts` list.
 
 ## [1.0.0] - 2026-07-18
 

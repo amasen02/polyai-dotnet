@@ -37,8 +37,7 @@ internal sealed class AnthropicProvider : ProviderBase
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, "Anthropic ChatAsync").ConfigureAwait(false);
 
-        var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        return ParseChatResponse(json);
+        return await ReadChatResponseAsync(response, ParseChatResponse, cancellationToken).ConfigureAwait(false);
     }
 
     public override async IAsyncEnumerable<string> StreamAsync(
@@ -134,28 +133,29 @@ internal sealed class AnthropicProvider : ProviderBase
         };
     }
 
-    private static ChatResponse ParseChatResponse(string json)
+    private static ChatResponse ParseChatResponse(JsonNode root)
     {
-        var root = JsonNode.Parse(json);
+        var contentBlocks = ReadContentBlocks(root);
+
         var content = string.Concat(
-            root?["content"]?.AsArray()
+            contentBlocks?
                 .Where(c => c?["type"]?.GetValue<string>() == "text")
                 .Select(c => c?["text"]?.GetValue<string>() ?? string.Empty)
             ?? []);
 
-        var model = root?["model"]?.GetValue<string>();
-        var stopReason = root?["stop_reason"]?.GetValue<string>();
+        var model = root["model"]?.GetValue<string>();
+        var stopReason = root["stop_reason"]?.GetValue<string>();
 
-        int? promptTokens = root?["usage"]?["input_tokens"]?.GetValue<int>();
-        int? completionTokens = root?["usage"]?["output_tokens"]?.GetValue<int>();
+        int? promptTokens = root["usage"]?["input_tokens"]?.GetValue<int>();
+        int? completionTokens = root["usage"]?["output_tokens"]?.GetValue<int>();
         TokenUsage? usage = promptTokens.HasValue && completionTokens.HasValue
             ? new TokenUsage(promptTokens.Value, completionTokens.Value)
             : null;
 
         var toolCalls = new List<ToolCall>();
-        if (root?["content"] is JsonArray contentArray)
+        if (contentBlocks is not null)
         {
-            foreach (var item in contentArray)
+            foreach (var item in contentBlocks)
             {
                 if (item?["type"]?.GetValue<string>() != "tool_use") continue;
                 var id = item["id"]?.GetValue<string>() ?? string.Empty;
@@ -167,6 +167,20 @@ internal sealed class AnthropicProvider : ProviderBase
 
         return new ChatResponse(content, toolCalls, usage, model, stopReason);
     }
+
+    /// <summary>
+    /// Reads the "content" block list. An absent block is tolerated as an empty message, but a
+    /// block of any other kind is a malformed response and is reported rather than silently read
+    /// as empty. <see cref="ProviderBase.ReadChatResponseAsync"/> translates the throw into a
+    /// <see cref="ProviderException"/> carrying the raw payload.
+    /// </summary>
+    private static JsonArray? ReadContentBlocks(JsonNode root) => root["content"] switch
+    {
+        null => null,
+        JsonArray blocks => blocks,
+        var other => throw new InvalidOperationException(
+            $"expected 'content' to be a JSON array of blocks but found {other.GetValueKind()}"),
+    };
 
     private static string? ParseStreamChunk(string data)
     {

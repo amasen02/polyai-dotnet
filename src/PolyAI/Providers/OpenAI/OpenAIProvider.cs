@@ -39,8 +39,7 @@ internal sealed class OpenAIProvider : ProviderBase
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, "OpenAI ChatAsync").ConfigureAwait(false);
 
-        var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        return ParseChatResponse(json);
+        return await ReadChatResponseAsync(response, ParseChatResponse, cancellationToken).ConfigureAwait(false);
     }
 
     public override async IAsyncEnumerable<string> StreamAsync(
@@ -139,17 +138,16 @@ internal sealed class OpenAIProvider : ProviderBase
         };
     }
 
-    private static ChatResponse ParseChatResponse(string json)
+    private static ChatResponse ParseChatResponse(JsonNode root)
     {
-        var root = JsonNode.Parse(json);
-        var choice = root?["choices"]?[0];
+        var choice = root["choices"]?[0];
         var message = choice?["message"];
         var content = message?["content"]?.GetValue<string>() ?? string.Empty;
         var finishReason = choice?["finish_reason"]?.GetValue<string>();
-        var model = root?["model"]?.GetValue<string>();
+        var model = root["model"]?.GetValue<string>();
 
-        int? promptTokens = root?["usage"]?["prompt_tokens"]?.GetValue<int>();
-        int? completionTokens = root?["usage"]?["completion_tokens"]?.GetValue<int>();
+        int? promptTokens = root["usage"]?["prompt_tokens"]?.GetValue<int>();
+        int? completionTokens = root["usage"]?["completion_tokens"]?.GetValue<int>();
         TokenUsage? usage = promptTokens.HasValue && completionTokens.HasValue
             ? new TokenUsage(promptTokens.Value, completionTokens.Value)
             : null;

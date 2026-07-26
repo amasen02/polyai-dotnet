@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using PolyAI.Abstractions;
 using PolyAI.Errors;
 
@@ -51,6 +52,52 @@ internal abstract class ProviderBase : IPolyAIClient
             throw new PolyAIException(
                 $"Provider {ProviderName} returned invalid JSON for structured output. Raw: {json}", ex);
         }
+    }
+
+    /// <summary>
+    /// Reads a provider's success-path response body and turns it into a <see cref="ChatResponse"/>.
+    /// </summary>
+    /// <remarks>
+    /// A response body is untrusted external input: a proxy can truncate it, a gateway can return an
+    /// empty 200, and a provider can change a field's shape. This method is the single boundary where
+    /// that is handled, which is why <paramref name="parse"/> runs inside it rather than at the call
+    /// site — every malformed-payload failure then surfaces as a <see cref="ProviderException"/>,
+    /// carrying the raw payload, so callers can rely on the documented contract that every failure of
+    /// this SDK is a <see cref="PolyAIException"/>.
+    /// </remarks>
+    protected async Task<ChatResponse> ReadChatResponseAsync(
+        HttpResponseMessage response,
+        Func<JsonNode, ChatResponse> parse,
+        CancellationToken cancellationToken)
+    {
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        var statusCode = (int)response.StatusCode;
+
+        if (string.IsNullOrWhiteSpace(body))
+            throw MalformedResponse(statusCode, body, "it was empty");
+
+        try
+        {
+            var root = JsonNode.Parse(body)
+                ?? throw MalformedResponse(statusCode, body, "it was the JSON literal null");
+            return parse(root);
+        }
+        // The malformed-payload surface of System.Text.Json, verified against the parser rather than
+        // assumed: a reader failure, a node read as the wrong kind (AsArray/GetValue<T> on a
+        // mismatched node), or an index past the end of a shorter-than-expected array. A payload can
+        // provoke any of the three. Anything else is a defect in this SDK, and must keep escaping.
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or ArgumentOutOfRangeException)
+        {
+            throw MalformedResponse(statusCode, body, ex.Message, ex);
+        }
+    }
+
+    private ProviderException MalformedResponse(int statusCode, string body, string reason, Exception? inner = null)
+    {
+        var message = $"could not read the HTTP {statusCode} response body: {reason}";
+        return inner is null
+            ? new ProviderException(ProviderName, message, statusCode, body)
+            : new ProviderException(ProviderName, message, inner, statusCode, body);
     }
 
     protected async Task EnsureSuccessAsync(HttpResponseMessage response, string context)

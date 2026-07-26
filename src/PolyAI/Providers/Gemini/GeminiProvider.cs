@@ -44,8 +44,8 @@ internal sealed class GeminiProvider : ProviderBase
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, "Gemini ChatAsync").ConfigureAwait(false);
 
-        var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        return ParseChatResponse(json, model);
+        return await ReadChatResponseAsync(response, root => ParseChatResponse(root, model), cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public override async IAsyncEnumerable<string> StreamAsync(
@@ -146,11 +146,10 @@ internal sealed class GeminiProvider : ProviderBase
         return body;
     }
 
-    private static ChatResponse ParseChatResponse(string json, string model)
+    private static ChatResponse ParseChatResponse(JsonNode root, string model)
     {
-        var root = JsonNode.Parse(json);
-        var candidate = root?["candidates"]?[0];
-        var parts = candidate?["content"]?["parts"]?.AsArray();
+        var candidate = root["candidates"]?[0];
+        var parts = ReadParts(candidate);
 
         var content = string.Concat(parts?
             .Where(p => p?["text"] is not null)
@@ -158,8 +157,8 @@ internal sealed class GeminiProvider : ProviderBase
 
         var finishReason = candidate?["finishReason"]?.GetValue<string>();
 
-        int? promptTokens = root?["usageMetadata"]?["promptTokenCount"]?.GetValue<int>();
-        int? completionTokens = root?["usageMetadata"]?["candidatesTokenCount"]?.GetValue<int>();
+        int? promptTokens = root["usageMetadata"]?["promptTokenCount"]?.GetValue<int>();
+        int? completionTokens = root["usageMetadata"]?["candidatesTokenCount"]?.GetValue<int>();
         TokenUsage? usage = promptTokens.HasValue && completionTokens.HasValue
             ? new TokenUsage(promptTokens.Value, completionTokens.Value)
             : null;
@@ -179,6 +178,21 @@ internal sealed class GeminiProvider : ProviderBase
 
         return new ChatResponse(content, toolCalls, usage, model, finishReason);
     }
+
+    /// <summary>
+    /// Reads a candidate's "parts" list. Gemini legitimately omits it — a candidate stopped by a
+    /// safety filter carries a finishReason and no parts — so an absent list is tolerated, while a
+    /// list of any other kind is a malformed response and is reported rather than silently read as
+    /// empty. <see cref="ProviderBase.ReadChatResponseAsync"/> translates the throw into a
+    /// <see cref="ProviderException"/> carrying the raw payload.
+    /// </summary>
+    private static JsonArray? ReadParts(JsonNode? candidate) => candidate?["content"]?["parts"] switch
+    {
+        null => null,
+        JsonArray parts => parts,
+        var other => throw new InvalidOperationException(
+            $"expected 'candidates[0].content.parts' to be a JSON array but found {other.GetValueKind()}"),
+    };
 
     private static string? ParseStreamChunk(string data)
     {
