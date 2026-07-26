@@ -9,6 +9,12 @@ namespace PolyAI.Providers.Gemini;
 /// <summary>Calls the Google Gemini generateContent API.</summary>
 internal sealed class GeminiProvider : ProviderBase
 {
+    /// <summary>
+    /// Gemini accepts the API key in this header. The key is never placed in the URL, because
+    /// request URIs are logged by Microsoft.Extensions.Http and by any proxy on the path.
+    /// </summary>
+    private const string ApiKeyHeader = "x-goog-api-key";
+
     private readonly HttpClient _http;
     private readonly GeminiOptions _options;
 
@@ -31,13 +37,9 @@ internal sealed class GeminiProvider : ProviderBase
         CancellationToken cancellationToken = default)
     {
         var model = options?.Model ?? _options.DefaultModel;
-        var endpoint = BuildEndpoint(model, stream: false);
         var body = BuildRequestBody(messages, options);
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
-        {
-            Content = new StringContent(JsonSerializer.Serialize(body, JsonOptions), System.Text.Encoding.UTF8, "application/json")
-        };
+        using var request = CreateRequest(model, stream: false, body);
 
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, "Gemini ChatAsync").ConfigureAwait(false);
@@ -52,13 +54,9 @@ internal sealed class GeminiProvider : ProviderBase
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var model = options?.Model ?? _options.DefaultModel;
-        var endpoint = BuildEndpoint(model, stream: true);
         var body = BuildRequestBody(messages, options);
 
-        var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
-        {
-            Content = new StringContent(JsonSerializer.Serialize(body, JsonOptions), System.Text.Encoding.UTF8, "application/json")
-        };
+        var request = CreateRequest(model, stream: true, body);
         request.Headers.Add("Accept", "text/event-stream");
 
         var response = await _http
@@ -71,10 +69,28 @@ internal sealed class GeminiProvider : ProviderBase
             yield return chunk;
     }
 
-    private string BuildEndpoint(string model, bool stream)
+    /// <summary>Builds a POST carrying the request body and the API key header.</summary>
+    private HttpRequestMessage CreateRequest(string model, bool stream, Dictionary<string, object?> body)
     {
-        var action = stream ? "streamGenerateContent?alt=sse" : "generateContent";
-        return $"{_options.BaseUrl.TrimEnd('/')}/models/{model}:{action}&key={_options.ApiKey}";
+        var request = new HttpRequestMessage(HttpMethod.Post, BuildEndpoint(model, stream))
+        {
+            Content = new StringContent(
+                JsonSerializer.Serialize(body, JsonOptions), System.Text.Encoding.UTF8, "application/json")
+        };
+        request.Headers.Add(ApiKeyHeader, _options.ApiKey);
+        return request;
+    }
+
+    private Uri BuildEndpoint(string model, bool stream)
+    {
+        // The model name is caller-supplied, so it is escaped before it enters the path: an
+        // unescaped '?' or '&' would otherwise inject or override query parameters. Each branch
+        // spells out the whole URL so that a missing '?' is visible on the line that builds it.
+        var resource = $"{_options.BaseUrl.TrimEnd('/')}/models/{Uri.EscapeDataString(model)}";
+
+        return stream
+            ? new Uri($"{resource}:streamGenerateContent?alt=sse")
+            : new Uri($"{resource}:generateContent");
     }
 
     private static Dictionary<string, object?> BuildRequestBody(IList<ChatMessage> messages, ChatOptions? options)
