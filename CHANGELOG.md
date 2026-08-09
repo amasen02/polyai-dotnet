@@ -6,8 +6,42 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- **Tool parameters are described to the model in full JSON Schema.** `ToolParameter` now exposes a
+  `JsonSchemaNode Schema` carrying `type`, `format`, `enum` members and a nested `items` schema for
+  collections; `JsonSchemaType` remains as shorthand for `Schema.Type`, and the existing
+  `ToolParameter(name, description, jsonSchemaType, required)` constructor is unchanged, so
+  hand-built tool definitions keep compiling. Enums now declare their member names, and `T[]`,
+  `List<T>` and any `IEnumerable<T>` declare `array` with the element schema nested.
+  `CancellationToken` parameters are omitted from the schema: the dispatching caller supplies them,
+  never the model.
+
 ### Fixed
 
+- **`ToolRegistry.FromInstance` now discovers tools on the object's runtime type.** It validated the
+  instance and then threw it away, calling `FromType(typeof(T))` — the *call site's static* type.
+  Tools resolved from DI are almost always held behind an interface or base type, so
+  `ITools tools = sp.GetRequiredService<ITools>(); ToolRegistry.FromInstance(tools);` returned an
+  **empty list**: the attributes live on the concrete class. The model was told the assistant had no
+  tools and nothing threw to explain why tool-calling had stopped working. Static tools declared on
+  the type are still reported — PolyAI never invokes a tool itself (the caller dispatches
+  `ToolCall.ArgumentsJson`), so a static tool is exactly as callable as an instance one.
+- **A tool parameter whose type has no JSON Schema mapping is rejected instead of being called a
+  `string`.** The type map covered only the primitives and every other type fell through a
+  `GetValueOrDefault(..., "string")` default, so `Book(DateTime when, string[] tags)` told the model
+  both were strings. The model then emitted `{"tags": "a, b"}` instead of `["a","b"]`, and the
+  mismatch surfaced only at invocation time as a binding failure with no link back to the schema
+  that caused it. `DateTime`/`DateTimeOffset` now carry `format: "date-time"`; `Guid`, `DateOnly`,
+  `TimeOnly` and the full set of numeric primitives are mapped; enums and collections are described
+  properly; and anything still unrepresentable — a DTO, a dictionary, a multi-dimensional array, a
+  self-referential collection — throws `PolyAIException` naming the tool and the parameter. Only
+  `date-time` is emitted as a string `format`, because Gemini rejects the request outright for any
+  other ("only 'enum' and 'date-time' are supported for STRING type").
+- **All three tool-sending providers now build that schema from one place.** OpenAI, Anthropic and
+  Gemini each carried their own copy of the properties/required loop, so the flattened schema was
+  wrong in triplicate and any fix had to be applied three times. They now share
+  `ToolSchemaWriter`, and a wire-format test asserts the emitted JSON for each provider.
 - **The Azure OpenAI provider now resolves its `HttpClient` from `IHttpClientFactory`.**
   Every other provider calls `CreateClient("polyai-<name>")`; `UseAzureOpenAI` alone ignored the
   service provider and constructed `new HttpClient(new AzureAuthHandler { InnerHandler = new

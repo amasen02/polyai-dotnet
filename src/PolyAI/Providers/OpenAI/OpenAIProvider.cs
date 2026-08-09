@@ -110,33 +110,16 @@ internal sealed class OpenAIProvider : ProviderBase
         content = msg.Content
     };
 
-    private static object ToOpenAITool(Tools.ToolDefinition tool)
+    private static object ToOpenAITool(Tools.ToolDefinition tool) => new
     {
-        var properties = new Dictionary<string, object>();
-        var required = new List<string>();
-
-        foreach (var param in tool.Parameters)
+        type = "function",
+        function = new
         {
-            properties[param.Name] = new { type = param.JsonSchemaType, description = param.Description };
-            if (param.Required) required.Add(param.Name);
+            name = tool.Name,
+            description = tool.Description,
+            parameters = Tools.ToolSchemaWriter.ToParameterSchema(tool)
         }
-
-        return new
-        {
-            type = "function",
-            function = new
-            {
-                name = tool.Name,
-                description = tool.Description,
-                parameters = new
-                {
-                    type = "object",
-                    properties,
-                    required
-                }
-            }
-        };
-    }
+    };
 
     private static ChatResponse ParseChatResponse(JsonNode root)
     {

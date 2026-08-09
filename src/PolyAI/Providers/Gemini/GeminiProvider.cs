@@ -130,14 +130,7 @@ internal sealed class GeminiProvider : ProviderBase
                     {
                         name = t.Name,
                         description = t.Description,
-                        parameters = new
-                        {
-                            type = "object",
-                            properties = t.Parameters.ToDictionary(
-                                p => p.Name,
-                                p => (object)new { type = p.JsonSchemaType, description = p.Description }),
-                            required = t.Parameters.Where(p => p.Required).Select(p => p.Name).ToArray()
-                        }
+                        parameters = Tools.ToolSchemaWriter.ToParameterSchema(t)
                     }).ToArray()
                 }
             };

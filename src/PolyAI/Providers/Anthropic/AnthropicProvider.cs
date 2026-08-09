@@ -109,29 +109,12 @@ internal sealed class AnthropicProvider : ProviderBase
         content = msg.Content
     };
 
-    private static object ToAnthropicTool(Tools.ToolDefinition tool)
+    private static object ToAnthropicTool(Tools.ToolDefinition tool) => new
     {
-        var properties = new Dictionary<string, object>();
-        var required = new List<string>();
-
-        foreach (var param in tool.Parameters)
-        {
-            properties[param.Name] = new { type = param.JsonSchemaType, description = param.Description };
-            if (param.Required) required.Add(param.Name);
-        }
-
-        return new
-        {
-            name = tool.Name,
-            description = tool.Description,
-            input_schema = new
-            {
-                type = "object",
-                properties,
-                required
-            }
-        };
-    }
+        name = tool.Name,
+        description = tool.Description,
+        input_schema = Tools.ToolSchemaWriter.ToParameterSchema(tool)
+    };
 
     private static ChatResponse ParseChatResponse(JsonNode root)
     {
