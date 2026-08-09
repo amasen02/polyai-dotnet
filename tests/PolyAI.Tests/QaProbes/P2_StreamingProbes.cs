@@ -18,6 +18,9 @@ public sealed class P2_StreamingProbes
     /// <summary>How long a correctly-cancelling stream is allowed to take to unwind.</summary>
     private static readonly TimeSpan CancelBudget = TimeSpan.FromSeconds(5);
 
+    /// <summary>How long a correctly-terminating stream is allowed to take to drain.</summary>
+    private static readonly TimeSpan DrainBudget = TimeSpan.FromSeconds(5);
+
     private static HttpResponseMessage SseResponseThatGoesIdle(string prefix, out IdleAfterPrefixStream stream)
     {
         stream = new IdleAfterPrefixStream(prefix);
@@ -57,11 +60,27 @@ public sealed class P2_StreamingProbes
         }
     }
 
+    /// <summary>
+    /// Drains a stream to completion under a budget. A TimeoutException means the enumeration
+    /// failed to terminate, rather than wedging the whole test run with no verdict.
+    /// </summary>
+    private static async Task<List<string>> DrainAsync(IAsyncEnumerable<string> stream)
+    {
+        var chunks = new List<string>();
+        await Task.Run(async () =>
+        {
+            await foreach (var chunk in stream) chunks.Add(chunk);
+        }).WaitAsync(DrainBudget);
+        return chunks;
+    }
+
     // ---------------------------------------------------------------- P2.1 – P2.4
-    // StreamReader.EndOfStream performs a SYNCHRONOUS, non-cancellable read to refill its
-    // buffer. On an open-but-idle SSE connection the `while (!reader.EndOfStream)` condition
-    // parks forever, so the ThrowIfCancellationRequested() inside the loop is never reached.
-    [Fact(Skip = "Documented defect: streaming cancellation wedge (EndOfStream blocks). Tracked in GRO da833594.")]
+    // Regression: StreamReader.EndOfStream refills its buffer with a SYNCHRONOUS, non-cancellable
+    // read. While the streaming loops were driven by `while (!reader.EndOfStream)`, an
+    // open-but-idle SSE connection parked in the loop CONDITION, so the
+    // ThrowIfCancellationRequested() in the body was never reached and cancellation never unwound.
+    // The loops now drive on `await reader.ReadLineAsync(ct)` and break on null.
+    [Fact]
     public async Task P2_1_OpenAI_StreamAsync_honours_cancellation_while_the_stream_is_idle()
     {
         var response = SseResponseThatGoesIdle(
@@ -78,7 +97,7 @@ public sealed class P2_StreamingProbes
             "enumeration is wedged on a synchronous, non-cancellable read");
     }
 
-    [Fact(Skip = "Documented defect: streaming cancellation wedge (EndOfStream blocks). Tracked in GRO da833594.")]
+    [Fact]
     public async Task P2_2_Anthropic_StreamAsync_honours_cancellation_while_the_stream_is_idle()
     {
         var response = SseResponseThatGoesIdle(
@@ -93,7 +112,7 @@ public sealed class P2_StreamingProbes
         outcome.Should().BeAssignableTo<OperationCanceledException>();
     }
 
-    [Fact(Skip = "Documented defect: streaming cancellation wedge (EndOfStream blocks). Tracked in GRO da833594.")]
+    [Fact]
     public async Task P2_3_Gemini_StreamAsync_honours_cancellation_while_the_stream_is_idle()
     {
         var response = SseResponseThatGoesIdle(
@@ -108,7 +127,7 @@ public sealed class P2_StreamingProbes
         outcome.Should().BeAssignableTo<OperationCanceledException>();
     }
 
-    [Fact(Skip = "Documented defect: streaming cancellation wedge (EndOfStream blocks). Tracked in GRO da833594.")]
+    [Fact]
     public async Task P2_4_Ollama_StreamAsync_honours_cancellation_while_the_stream_is_idle()
     {
         var response = SseResponseThatGoesIdle(
@@ -126,7 +145,7 @@ public sealed class P2_StreamingProbes
     // ---------------------------------------------------------------- P2.5
     // Azure OpenAI is the 5th provider; it delegates to OpenAIProvider, so it inherits the
     // same streaming path. Asserted explicitly because the QA scope names all five.
-    [Fact(Skip = "Documented defect: streaming cancellation wedge (EndOfStream blocks). Tracked in GRO da833594.")]
+    [Fact]
     public async Task P2_5_AzureOpenAI_StreamAsync_honours_cancellation_while_the_stream_is_idle()
     {
         var response = SseResponseThatGoesIdle(
@@ -220,6 +239,54 @@ public sealed class P2_StreamingProbes
         await foreach (var c in provider.StreamAsync([ChatMessage.User("Hi")])) chunks.Add(c);
 
         chunks.Should().Equal("A", "B", "");
+    }
+
+    // ---------------------------------------------------------------- P2.11 – P2.12
+    // A stream that simply ENDS, with no terminator, must still terminate the enumeration.
+    // Neither P2.7 nor P2.8 covers this: both finish with an explicit sentinel ([DONE] / done:true),
+    // so a loop that fails to break on a null line passes them both while spinning forever on a
+    // truncated or aborted connection. These pin the null-line break itself.
+
+    [Fact]
+    public async Task P2_11_An_SSE_stream_that_ends_without_DONE_terminates_the_enumeration()
+    {
+        const string sse =
+            "data: {\"choices\":[{\"delta\":{\"content\":\"A\"}}]}\n" +
+            "data: {\"choices\":[{\"delta\":{\"content\":\"B\"}}]}\n";
+
+        var provider = new OpenAIProvider(
+            new HttpClient(new CapturingHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(sse, System.Text.Encoding.UTF8, "text/event-stream")
+            })),
+            new OpenAIOptions { ApiKey = "k" });
+
+        var chunks = await DrainAsync(provider.StreamAsync([ChatMessage.User("Hi")]));
+
+        chunks.Should().Equal(new[] { "A", "B" },
+            "the loop must break when ReadLineAsync returns null; a TimeoutException here means " +
+            "it is spinning on an already-drained stream");
+    }
+
+    [Fact]
+    public async Task P2_12_An_NDJSON_stream_that_ends_without_done_true_terminates_the_enumeration()
+    {
+        const string ndjson =
+            "{\"message\":{\"content\":\"A\"},\"done\":false}\n" +
+            "{\"message\":{\"content\":\"B\"},\"done\":false}\n";
+
+        var provider = new OllamaProvider(
+            new HttpClient(new CapturingHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(ndjson, System.Text.Encoding.UTF8, "application/x-ndjson")
+            })),
+            new OllamaOptions());
+
+        var chunks = await DrainAsync(provider.StreamAsync([ChatMessage.User("Hi")]));
+
+        chunks.Should().Equal(new[] { "A", "B" },
+            "the null line must be tested BEFORE the whitespace skip: string.IsNullOrWhiteSpace(null) " +
+            "is true, so a `continue` on null would swallow the end-of-stream signal and spin forever");
     }
 
     // ---------------------------------------------------------------- P2.9

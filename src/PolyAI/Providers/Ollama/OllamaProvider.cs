@@ -63,10 +63,16 @@ internal sealed class OllamaProvider : ProviderBase
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         using var reader = new System.IO.StreamReader(stream, System.Text.Encoding.UTF8);
 
-        while (!reader.EndOfStream)
+        // Driven by ReadLineAsync, never StreamReader.EndOfStream: EndOfStream refills the buffer
+        // with a synchronous, non-cancellable read, so on an open-but-idle connection it parks in
+        // the loop condition and the token is never observed.
+        while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+            // End of stream must be tested before the blank-line skip: IsNullOrWhiteSpace(null)
+            // is true, so folding the two together would swallow the terminator and spin forever.
+            if (line is null) break;
             if (string.IsNullOrWhiteSpace(line)) continue;
 
             string? chunk = null;

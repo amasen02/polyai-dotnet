@@ -8,6 +8,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
+- **Cancelling a stream no longer wedges the caller, on any of the five providers.**
+  `ProviderBase.ReadSseChunksAsync` and the NDJSON loop in `OllamaProvider.StreamAsync` drove their
+  reads from `while (!reader.EndOfStream)`. `StreamReader.EndOfStream` refills its buffer with a
+  *synchronous*, non-cancellable read, and responses are requested with
+  `HttpCompletionOption.ResponseHeadersRead`, so on an open-but-idle connection — the normal state
+  between tokens — the loop parked in its **condition** and never reached the
+  `ThrowIfCancellationRequested()` in its body. The token was therefore never observed: an ASP.NET
+  Core client disconnect leaked the request for the lifetime of the connection, and every buffer
+  refill blocked a thread-pool thread on network I/O, capping streaming concurrency under load.
+  Both loops now drive on `await reader.ReadLineAsync(cancellationToken)` and stop when it returns
+  `null`. OpenAI, Anthropic, Gemini and Azure OpenAI share the SSE path; Ollama has its own.
+- **A truncated Ollama stream now ends the enumeration instead of spinning.** In the NDJSON loop the
+  end-of-stream check deliberately precedes the blank-line skip, because
+  `string.IsNullOrWhiteSpace(null)` is `true` — folding the two together would swallow the
+  end-of-stream signal and spin on a stream that ends without a `done: true` terminator.
 - **A malformed provider response no longer escapes the `PolyAIException` contract.** Every provider
   parsed the response body with an unguarded `JsonNode.Parse`, so a truncated body, an empty `200`
   from a proxy, or an unexpected field shape surfaced as a raw `System.Text.Json.JsonReaderException`
