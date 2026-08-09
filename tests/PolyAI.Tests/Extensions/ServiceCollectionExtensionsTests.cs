@@ -92,14 +92,89 @@ public sealed class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void AddPolyAI_throws_when_no_providers_configured()
+    public void AddPolyAI_throws_at_registration_when_no_providers_configured()
     {
         var services = new ServiceCollection();
-        services.AddPolyAI(_ => { }); // no providers registered
+
+        var act = () => services.AddPolyAI(_ => { }); // no providers registered
+
+        act.Should().Throw<PolyAIException>("a container with no providers can never serve a request")
+            .WithMessage("*No AI providers registered*");
+    }
+
+    [Fact]
+    public void AddPolyAI_throws_at_registration_when_the_default_provider_was_never_registered()
+    {
+        var services = new ServiceCollection();
+
+        var act = () => services.AddPolyAI(o => o
+            .UseOpenAI("key1")
+            .WithDefaultProvider("opemai")); // typo
+
+        act.Should().Throw<PolyAIException>("a typo must fail at startup, not on the first user request")
+            .WithMessage("*opemai*");
+    }
+
+    [Fact]
+    public void AddPolyAI_unknown_default_error_lists_the_registered_providers()
+    {
+        var services = new ServiceCollection();
+
+        var act = () => services.AddPolyAI(o => o
+            .UseOpenAI("key1")
+            .UseAnthropic("sk-ant-key")
+            .WithDefaultProvider("opemai"));
+
+        act.Should().Throw<PolyAIException>()
+            .WithMessage("*openai*").WithMessage("*anthropic*");
+    }
+
+    [Fact]
+    public void AddPolyAI_allows_the_default_to_be_named_before_the_provider_it_refers_to()
+    {
+        var services = new ServiceCollection();
+
+        // The fluent API permits naming the default first; validation must be deferred to
+        // Build() rather than evaluated inside WithDefaultProvider.
+        services.AddPolyAI(o => o
+            .WithDefaultProvider("anthropic")
+            .UseOpenAI("key1")
+            .UseAnthropic("sk-ant-key"));
 
         var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<IPolyAIRouter>().GetProvider().ProviderName.Should().Be("anthropic");
+    }
 
-        var act = () => provider.GetRequiredService<IPolyAIRouter>();
-        act.Should().Throw<Exception>().WithMessage("*No AI providers registered*");
+    [Fact]
+    public void AddPolyAI_matches_the_default_provider_name_case_insensitively()
+    {
+        var services = new ServiceCollection();
+
+        services.AddPolyAI(o => o
+            .UseOpenAI("key1")
+            .UseAnthropic("sk-ant-key")
+            .WithDefaultProvider("AnThRoPiC"));
+
+        var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<IPolyAIRouter>().GetProvider().ProviderName.Should().Be("anthropic");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void WithDefaultProvider_rejects_a_missing_name(string? providerName)
+    {
+        var services = new ServiceCollection();
+
+        // A missing configuration key binds to null/empty here. Without this guard the name is
+        // stored verbatim and Build() silently falls back to whichever provider was registered
+        // first, so the application runs against a provider nobody chose.
+        var act = () => services.AddPolyAI(o => o
+            .UseOpenAI("key1")
+            .UseAnthropic("sk-ant-key")
+            .WithDefaultProvider(providerName!));
+
+        act.Should().Throw<ArgumentException>("an absent default must be reported, not guessed");
     }
 }
