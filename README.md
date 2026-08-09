@@ -255,7 +255,7 @@ ANTHROPIC_API_KEY=sk-ant-... docker compose up
 
 ## Tests
 
-132 xUnit tests covering all providers, the DI wiring, error types, streaming, tool discovery and schema generation, structured output deserialization, and the outgoing request wire format. All tests use fake HTTP handlers — no live API calls, no environment variables required.
+135 xUnit tests covering all providers, the DI wiring, error types, streaming, tool discovery and schema generation, structured output deserialization, and the outgoing request wire format. All tests use fake HTTP handlers — no live API calls, no environment variables required.
 
 `FakeHttpMessageHandler` serves canned responses; `CapturingHandler` (in `QaProbes/`) additionally records the outgoing URI, headers, and body, so a provider that builds a malformed request URL fails a test instead of failing in production.
 
