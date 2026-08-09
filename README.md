@@ -102,6 +102,35 @@ foreach (var call in response.ToolCalls)
     Console.WriteLine($"Model called: {call.Name}({call.ArgumentsJson})");
 ```
 
+`FromInstance` uses the object's **runtime** type, so a tool object resolved from DI behind an
+interface or base type (`ITools tools = sp.GetRequiredService<ITools>()`) is discovered normally.
+
+#### Parameter types
+
+Each parameter is described to the model as JSON Schema:
+
+| C# type | Schema |
+|---|---|
+| `string`, `Guid`, `DateOnly`, `TimeOnly` | `string` |
+| `DateTime`, `DateTimeOffset` | `string` with `format: "date-time"` |
+| `byte` … `ulong` | `integer` |
+| `float`, `double`, `decimal` | `number` |
+| `bool` | `boolean` |
+| any `enum` | `string` with the member names as `enum` |
+| `T[]`, `List<T>`, any `IEnumerable<T>` | `array` with a nested `items` schema |
+| `T?` | the schema of `T`, and not required |
+| `CancellationToken` | omitted — supplied by your dispatch code, never by the model |
+
+Any other type — a DTO, a dictionary, a multi-dimensional array — throws `PolyAIException` at
+discovery time, naming the tool and the parameter. A schema that silently mislabels a parameter is
+worse than a startup error: the model emits `"a, b"` where the tool expects `["a","b"]`, and the
+mismatch surfaces much later as an unexplained binding failure. Accept a JSON string and
+deserialize it inside the tool if you need a richer shape.
+
+Only `date-time` is emitted as a string `format`. Gemini rejects every other one ("only 'enum' and
+'date-time' are supported for STRING type"), so a wider set would turn a valid tool into a failed
+request on one of the five providers.
+
 ### Route to a specific provider
 
 ```csharp
@@ -133,6 +162,7 @@ PolyAI.DotNet
 ├── Tools/
 │   ├── [PolyAITool]        ← mark a method as a callable tool
 │   ├── [PolyAIParam]       ← describe a parameter
+│   ├── JsonSchemaNode      ← parameter schema: type, format, enum, array items
 │   └── ToolRegistry        ← reflection-based discovery
 ├── Errors/
 │   ├── PolyAIException
@@ -225,7 +255,7 @@ ANTHROPIC_API_KEY=sk-ant-... docker compose up
 
 ## Tests
 
-39 xUnit tests covering all providers, the DI wiring, error types, streaming, tool discovery, structured output deserialization, and the outgoing request wire format. All tests use fake HTTP handlers — no live API calls, no environment variables required.
+132 xUnit tests covering all providers, the DI wiring, error types, streaming, tool discovery and schema generation, structured output deserialization, and the outgoing request wire format. All tests use fake HTTP handlers — no live API calls, no environment variables required.
 
 `FakeHttpMessageHandler` serves canned responses; `CapturingHandler` (in `QaProbes/`) additionally records the outgoing URI, headers, and body, so a provider that builds a malformed request URL fails a test instead of failing in production.
 
