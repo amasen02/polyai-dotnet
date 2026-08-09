@@ -8,6 +8,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
+- **A misconfigured `AddPolyAI` now fails at startup instead of on the first user request.**
+  `WithDefaultProvider(name)` stored the name verbatim and `Build()` never compared it against the
+  registered factories, so `.UseOpenAI(key).WithDefaultProvider("opemai")` returned normally,
+  `BuildServiceProvider()` succeeded, health checks passed and the pod went Ready — then every
+  request threw `PolyAIException: No provider registered under 'opemai'`. A zero-provider
+  registration behaved the same way: `PolyAIRouter`'s constructor did guard it, but that constructor
+  runs on first *resolution*, not at registration. `Build()` now rejects both, before it touches the
+  `IServiceCollection`, and the unknown-default message lists the providers that *were* registered.
+  The default may still be named before the provider it refers to — the check is deliberately in
+  `Build()`, not in `WithDefaultProvider`, so `.WithDefaultProvider("openai").UseOpenAI(key)` keeps
+  working.
+- **A default provider bound from an absent configuration key is no longer guessed.**
+  `WithDefaultProvider` accepted null, empty and whitespace, so the common
+  `.WithDefaultProvider(config["Ai:DefaultProvider"]!)` silently fell back to whichever provider
+  happened to be registered first — the application ran, and answered every request with a provider
+  nobody had chosen. It now throws `ArgumentException` at the call site. Naming no default at all is
+  still valid and still selects the first registered provider; that is a stated default, not a
+  missing one.
 - **Cancelling a stream no longer wedges the caller, on any of the five providers.**
   `ProviderBase.ReadSseChunksAsync` and the NDJSON loop in `OllamaProvider.StreamAsync` drove their
   reads from `while (!reader.EndOfStream)`. `StreamReader.EndOfStream` refills its buffer with a

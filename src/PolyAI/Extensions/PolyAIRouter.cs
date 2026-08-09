@@ -8,6 +8,14 @@ namespace PolyAI.Extensions;
 /// </summary>
 internal sealed class PolyAIRouter : IPolyAIRouter
 {
+    /// <summary>
+    /// Shared by <see cref="PolyAIBuilder.Build"/>, which rejects the configuration before the
+    /// container is built, and by this constructor, which guards the invariant for any future
+    /// caller. Declared once so the two cannot drift apart.
+    /// </summary>
+    internal const string NoProvidersRegisteredMessage =
+        "No AI providers registered. Call .UseAnthropic(), .UseOpenAI() etc. in AddPolyAI().";
+
     private readonly IReadOnlyDictionary<string, IPolyAIClient> _providers;
     private readonly string _defaultProvider;
 
@@ -16,7 +24,7 @@ internal sealed class PolyAIRouter : IPolyAIRouter
     public PolyAIRouter(IReadOnlyDictionary<string, IPolyAIClient> providers, string defaultProvider)
     {
         if (providers.Count == 0)
-            throw new PolyAIException("No AI providers registered. Call .UseAnthropic(), .UseOpenAI() etc. in AddPolyAI().");
+            throw new PolyAIException(NoProvidersRegisteredMessage);
 
         _providers = providers;
         _defaultProvider = defaultProvider;

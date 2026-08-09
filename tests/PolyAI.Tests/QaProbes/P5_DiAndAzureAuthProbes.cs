@@ -118,16 +118,14 @@ public sealed class P5_DiAndAzureAuthProbes
     }
 
     // ---------------------------------------------------------------- P5.7
-    // No providers registered — QA scope. Verified-good, but note the failure is deferred to
-    // first resolve rather than raised at AddPolyAI time.
+    // No providers registered — QA scope. Fixed in GRO-291: the error is now raised at
+    // AddPolyAI time instead of being deferred to the first resolve.
     [Fact]
-    public void P5_7_Resolving_the_router_with_no_providers_registered_throws_a_clear_error()
+    public void P5_7_Registering_no_providers_throws_a_clear_error_at_AddPolyAI_time()
     {
         var services = new ServiceCollection();
-        services.AddPolyAI(_ => { });
-        using var provider = services.BuildServiceProvider();
 
-        var act = () => provider.GetRequiredService<IPolyAIRouter>();
+        var act = () => services.AddPolyAI(_ => { });
 
         act.Should().Throw<PolyAIException>().WithMessage("*No AI providers registered*");
     }
@@ -149,10 +147,10 @@ public sealed class P5_DiAndAzureAuthProbes
     }
 
     // ---------------------------------------------------------------- P5.9
-    // A typo in WithDefaultProvider names a provider that was never registered. Nothing
-    // validates it, so the container builds clean and the failure surfaces on the first
-    // request instead of at startup.
-    [Fact(Skip = "Documented defect: AzureAuthHandler and DI configuration validation gaps. Tracked in GRO-DIAZURE.")]
+    // A typo in WithDefaultProvider names a provider that was never registered. Build() now
+    // validates the default against the registered factories, so the container refuses to
+    // build instead of failing on the first request. Fixed in GRO-291.
+    [Fact]
     public void P5_9_WithDefaultProvider_rejects_a_name_that_was_never_registered()
     {
         var services = new ServiceCollection();

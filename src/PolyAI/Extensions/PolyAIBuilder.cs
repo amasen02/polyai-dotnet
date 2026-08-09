@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using PolyAI.Abstractions;
+using PolyAI.Errors;
 using PolyAI.Providers.Anthropic;
 using PolyAI.Providers.Azure;
 using PolyAI.Providers.Gemini;
@@ -90,14 +91,35 @@ public sealed class PolyAIBuilder
     }
 
     /// <summary>Sets which provider is resolved when no name is specified.</summary>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="providerName"/> is null, empty, or whitespace. A missing configuration key
+    /// binds to null here; guessing a default would silently route traffic to a provider nobody
+    /// chose. Whether the name matches a registered provider is checked later, in <see cref="Build"/>,
+    /// because the fluent API allows the default to be named before the provider it refers to.
+    /// </exception>
     public PolyAIBuilder WithDefaultProvider(string providerName)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerName);
+
         _defaultProvider = providerName;
         return this;
     }
 
     internal void Build()
     {
+        // Reject an unusable configuration before touching the service collection: everything
+        // needed to detect it is known here, and the alternative is a container that builds
+        // clean, passes health checks, and throws on the first user request.
+        if (_factories.Count == 0)
+            throw new PolyAIException(PolyAIRouter.NoProvidersRegisteredMessage);
+
+        var defaultProvider = _defaultProvider ?? _factories.Keys.First();
+
+        if (!_factories.ContainsKey(defaultProvider))
+            throw new PolyAIException(
+                $"WithDefaultProvider(\"{defaultProvider}\") names a provider that was never registered. "
+                + $"Registered providers: {string.Join(", ", _factories.Keys)}.");
+
         // Register named HttpClients for each provider
         _services.AddHttpClient("polyai-openai");
         _services.AddHttpClient("polyai-anthropic");
@@ -106,7 +128,6 @@ public sealed class PolyAIBuilder
         _services.AddHttpClient("polyai-azure-openai");
 
         var factories = new Dictionary<string, Func<IServiceProvider, IPolyAIClient>>(_factories, StringComparer.OrdinalIgnoreCase);
-        var defaultProvider = _defaultProvider ?? factories.Keys.FirstOrDefault() ?? string.Empty;
 
         _services.AddSingleton<IPolyAIRouter>(sp =>
         {
