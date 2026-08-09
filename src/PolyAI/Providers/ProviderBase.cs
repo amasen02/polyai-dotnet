@@ -128,7 +128,10 @@ internal abstract class ProviderBase : IPolyAIClient
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         using var reader = new System.IO.StreamReader(stream, System.Text.Encoding.UTF8);
 
-        while (!reader.EndOfStream)
+        // Driven by ReadLineAsync, never StreamReader.EndOfStream: EndOfStream refills the buffer
+        // with a synchronous, non-cancellable read, so on an open-but-idle connection it parks in
+        // the loop condition and the token is never observed.
+        while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
