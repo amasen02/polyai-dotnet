@@ -15,9 +15,12 @@ namespace PolyAI.Extensions;
 /// </summary>
 public sealed class PolyAIBuilder
 {
+    private const string AzureClientName = "polyai-azure-openai";
+
     private readonly IServiceCollection _services;
     private readonly Dictionary<string, Func<IServiceProvider, IPolyAIClient>> _factories = new(StringComparer.OrdinalIgnoreCase);
     private string? _defaultProvider;
+    private AzureOpenAIOptions? _azureOptions;
 
     internal PolyAIBuilder(IServiceCollection services)
     {
@@ -78,14 +81,14 @@ public sealed class PolyAIBuilder
             DeploymentName = deploymentName,
         };
         configure?.Invoke(options);
-        AddFactory("azure-openai", _ =>
-        {
-            var handler = new Providers.Azure.AzureAuthHandler(options.ApiKey, options.ApiVersion)
-            {
-                InnerHandler = new HttpClientHandler()
-            };
-            return new AzureOpenAIProvider(new HttpClient(handler), options);
-        });
+
+        // Held for Build(), which attaches the Azure auth handler to the named client. Configuring
+        // the client here instead would register services before the configuration has been
+        // validated, leaving a rejected AddPolyAI call's container half-populated.
+        _azureOptions = options;
+
+        AddFactory("azure-openai", sp => new AzureOpenAIProvider(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient(AzureClientName), options));
         _defaultProvider ??= "azure-openai";
         return this;
     }
@@ -125,7 +128,15 @@ public sealed class PolyAIBuilder
         _services.AddHttpClient("polyai-anthropic");
         _services.AddHttpClient("polyai-gemini");
         _services.AddHttpClient("polyai-ollama");
-        _services.AddHttpClient("polyai-azure-openai");
+        var azureClient = _services.AddHttpClient(AzureClientName);
+
+        // Azure authenticates with an `api-key` header and an `api-version` query parameter instead
+        // of the Bearer auth its underlying OpenAI provider sets, so its named client carries one
+        // extra handler. Attaching it here keeps the client resolvable from IHttpClientFactory like
+        // every other provider, so handlers a consumer adds to this name are actually in the path.
+        if (_azureOptions is { } azureOptions)
+            azureClient.AddHttpMessageHandler(
+                () => new Providers.Azure.AzureAuthHandler(azureOptions.ApiKey, azureOptions.ApiVersion));
 
         var factories = new Dictionary<string, Func<IServiceProvider, IPolyAIClient>>(_factories, StringComparer.OrdinalIgnoreCase);
 

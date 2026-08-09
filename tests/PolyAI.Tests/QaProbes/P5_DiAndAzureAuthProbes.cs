@@ -162,17 +162,14 @@ public sealed class P5_DiAndAzureAuthProbes
     }
 
     // ---------------------------------------------------------------- P5.10
-    // Providers are constructed inside a singleton factory holding an IHttpClientFactory
-    // client for the process lifetime, which defeats handler rotation and DNS refresh.
-    // Azure goes further and bypasses the factory with `new HttpClient(...)`, leaving the
-    // registered "polyai-azure-openai" named client unused.
-    [Fact(Skip = "Documented defect: AzureAuthHandler and DI configuration validation gaps. Tracked in GRO-DIAZURE.")]
+    // Azure bypassed the factory with `new HttpClient(...)`, leaving the registered
+    // "polyai-azure-openai" named client unused. Fixed in GRO-290: every provider now resolves
+    // its client from IHttpClientFactory. Note this probe does not cover handler rotation —
+    // the router is a singleton that holds each client for the process lifetime, which defeats
+    // rotation and DNS refresh for every provider alike. That is tracked separately.
+    [Fact]
     public void P5_10_Every_registered_named_HttpClient_is_actually_used_by_a_provider()
     {
-        var services = new ServiceCollection();
-        services.AddPolyAI(b => b.UseAzureOpenAI("k", "https://r.openai.azure.com", "gpt-4o"));
-        using var sp = services.BuildServiceProvider();
-
         var azureHandlerWasBuilt = false;
         var probe = new ServiceCollection();
         probe.AddPolyAI(b => b.UseAzureOpenAI("k", "https://r.openai.azure.com", "gpt-4o"));
@@ -186,9 +183,8 @@ public sealed class P5_DiAndAzureAuthProbes
         probeSp.GetRequiredService<IPolyAIRouter>().GetProvider("azure-openai");
 
         azureHandlerWasBuilt.Should().BeTrue(
-            "PolyAIBuilder registers the named client polyai-azure-openai but UseAzureOpenAI " +
-            "constructs `new HttpClient(new AzureAuthHandler{InnerHandler=new HttpClientHandler()})`, " +
-            "so the factory registration is dead and the socket has no PooledConnectionLifetime");
+            "the polyai-azure-openai named client must be the one the Azure provider resolves, " +
+            "otherwise the registration is dead and consumer configuration of it is silently ignored");
     }
 
     // ---------------------------------------------------------------- P5.11

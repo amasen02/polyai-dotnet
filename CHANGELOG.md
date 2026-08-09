@@ -8,6 +8,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
+- **The Azure OpenAI provider now resolves its `HttpClient` from `IHttpClientFactory`.**
+  Every other provider calls `CreateClient("polyai-<name>")`; `UseAzureOpenAI` alone ignored the
+  service provider and constructed `new HttpClient(new AzureAuthHandler { InnerHandler = new
+  HttpClientHandler() })`. The `polyai-azure-openai` named client was registered but never resolved,
+  which made the code read as though Azure went through the factory when it did not — and meant
+  everything a consumer attached to that name was silently discarded: `AddPolicyHandler`,
+  `AddStandardResilienceHandler`, `ConfigurePrimaryHttpMessageHandler`, proxy or certificate
+  configuration, or a test double. Neither the client nor its handler was ever disposed, so a host
+  that rebuilt its container leaked a socket-owning handler per build; the factory now owns that
+  lifetime. The Azure auth handler is attached to the named client in `Build()` rather than in
+  `UseAzureOpenAI`, so a rejected configuration still registers nothing at all.
+  This does **not** restore handler rotation or DNS refresh. `PolyAIRouter` is a singleton that
+  resolves each client once and holds it for the process lifetime, so no provider — Azure or any
+  other — picks up a rotated handler. Measured with a one-second handler lifetime: a provider's
+  second call after expiry still used the original chain, while a fresh `CreateClient` on the same
+  name did rotate.
 - **A misconfigured `AddPolyAI` now fails at startup instead of on the first user request.**
   `WithDefaultProvider(name)` stored the name verbatim and `Build()` never compared it against the
   registered factories, so `.UseOpenAI(key).WithDefaultProvider("opemai")` returned normally,
