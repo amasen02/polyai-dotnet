@@ -1,5 +1,10 @@
 # PolyAI.DotNet
 
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/amasen02/polyai-dotnet/badge)](https://securityscorecards.dev/viewer/?uri=github.com/amasen02/polyai-dotnet)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/10332/badge)](https://www.bestpractices.dev/en)
+[![Security Policy](https://img.shields.io/badge/Security-Policy-blue.svg)](.github/SECURITY.md)
+
+
 [![CI](https://github.com/amasen02/polyai-dotnet/actions/workflows/ci.yml/badge.svg)](https://github.com/amasen02/polyai-dotnet/actions/workflows/ci.yml)
 [![NuGet](https://img.shields.io/nuget/v/PolyAI.DotNet.svg)](https://www.nuget.org/packages/PolyAI.DotNet)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -289,3 +294,32 @@ dotnet test
 **Ama Senevirathne** — [github.com/amasen02](https://github.com/amasen02)
 
 Also see: [freshcart-backend](https://github.com/amasen02/freshcart-backend) — a full .NET 10 Aspire microservices e-commerce platform.
+
+---
+
+## 🌟 Fork, Build Upon & Extend This Project
+
+We deliberately built this repository to be **100% open, modular, and easy to fork and extend**:
+
+- 🔓 **Permissive MIT License**: Zero CLA, commercial use permitted, you keep full ownership of your contributions.
+- 🛡️ **Hardened Supply Chain**: Built with automated CI testing, OpenSSF Scorecard supply-chain security, and strict quality checks.
+- ⚡ **High-Performance Foundation**: Zero unnecessary bloat &mdash; clean architectural boundaries that make hacking on this code a joy.
+
+### 💡 High-Impact Ideas Ready for You to Build:
+- **Add adapters for DeepSeek, Groq, Mistral, and Cohere providers**
+- **Implement distributed semantic caching provider using Redis / HybridCache in .NET 9**
+- **Add built-in rate limiter and exponential fallback router across AI model tiers**
+- **Implement ASP.NET Core middleware for automatic token metering and cost tracing**
+
+### 🚀 60-Second Quickstart
+```bash
+git clone https://github.com/amasen02/polyai-dotnet.git
+cd polyai-dotnet
+dotnet test
+```
+
+### 🤝 Frictionless Contributions
+1. **Fork** the repo & clone it locally.
+2. Create your feature branch (`git checkout -b feat/my-awesome-idea`).
+3. Verify tests pass cleanly.
+4. Open a PR &mdash; we review and merge PRs within 24–48 hours!
