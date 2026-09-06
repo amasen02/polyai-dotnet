@@ -1,7 +1,6 @@
 # PolyAI.DotNet
 
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/amasen02/polyai-dotnet/badge)](https://securityscorecards.dev/viewer/?uri=github.com/amasen02/polyai-dotnet)
-[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/10332/badge)](https://www.bestpractices.dev/en)
 [![Security Policy](https://img.shields.io/badge/Security-Policy-blue.svg)](.github/SECURITY.md)
 
 
