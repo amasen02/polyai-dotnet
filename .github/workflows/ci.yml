@@ -89,8 +89,13 @@ jobs:
           services.AddPolyAI(options => options.UseOllama());
           Console.WriteLine("PolyAI local package consumer compiled.");
           EOF
-          dotnet restore "$consumer_dir/PolyAI.PackageConsumer.csproj" --configfile "$consumer_dir/NuGet.Config"
-          dotnet build "$consumer_dir" --no-restore -warnaserror
+          package_cache="$consumer_dir/packages"
+          dotnet restore "$consumer_dir/PolyAI.PackageConsumer.csproj" --configfile "$consumer_dir/NuGet.Config" --packages "$package_cache"
+          expected_hash="$(openssl dgst -sha512 -binary "$GITHUB_WORKSPACE/artifacts/PolyAI.DotNet.1.0.0.nupkg" | base64 -w0)"
+          actual_hash="$(tr -d '\r\n' < "$package_cache/polyai.dotnet/1.0.0/polyai.dotnet.1.0.0.nupkg.sha512")"
+          test "$actual_hash" = "$expected_hash"
+          grep -F "\"source\": \"$GITHUB_WORKSPACE/artifacts\"" "$package_cache/polyai.dotnet/1.0.0/.nupkg.metadata"
+          dotnet build "$consumer_dir/PolyAI.PackageConsumer.csproj" --no-restore -warnaserror
       - name: Upload package artifact
         uses: actions/upload-artifact@v7
         with:
