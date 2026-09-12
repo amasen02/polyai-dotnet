@@ -290,8 +290,7 @@ public sealed class P2_StreamingProbes
     }
 
     // ---------------------------------------------------------------- P2.9
-    // StreamAsync never disposes the HttpResponseMessage. On the error path the response is
-    // abandoned entirely — the connection is not returned to the pool.
+    // On an error path the iterator still owns and disposes the response before propagating it.
     [Fact]
     public async Task P2_9_A_failed_stream_request_disposes_its_response()
     {
@@ -308,13 +307,11 @@ public sealed class P2_StreamingProbes
         await act.Should().ThrowAsync<ProviderException>();
 
         content.Disposed.Should().BeTrue(
-            "StreamAsync builds the request and response without 'using'; when " +
-            "EnsureSuccessAsync throws, the HttpResponseMessage is never disposed");
+            "the streaming iterator owns the response when EnsureSuccessAsync throws");
     }
 
     // ---------------------------------------------------------------- P2.10
-    // Same leak on the success path when the consumer stops early — the common
-    // 'take the first N tokens then break' pattern.
+    // Early consumer exit must release the response used by the streaming iterator.
     [Fact]
     public async Task P2_10_Breaking_out_of_a_stream_early_disposes_the_response()
     {
