@@ -155,6 +155,28 @@ public sealed class P3_StructuredOutputProbes
         await act.Should().ThrowAsync<PolyAIException>();
     }
 
+    [Theory]
+    [InlineData("```python\nprint(1)\n```\n```json\n{\"city\":\"Colombo\"}\n```")]
+    [InlineData("```json\n{\"city\":\"Colombo\"}\n```\n```python\nprint(1)\n```")]
+    public async Task StructuredAsync_rejects_a_recognized_JSON_fence_combined_with_another_language_fence(string content)
+    {
+        var provider = ProviderReturning(content);
+
+        var act = async () => await provider.StructuredAsync<WeatherReport>([ChatMessage.User("weather?")]);
+
+        await act.Should().ThrowAsync<PolyAIException>();
+    }
+
+    [Fact]
+    public async Task StructuredAsync_rejects_an_unmatched_extra_fence_delimiter_line()
+    {
+        var provider = ProviderReturning("```json\n{\"city\":\"Colombo\"}\n```\n```");
+
+        var act = async () => await provider.StructuredAsync<WeatherReport>([ChatMessage.User("weather?")]);
+
+        await act.Should().ThrowAsync<PolyAIException>();
+    }
+
     [Fact]
     public async Task StructuredAsync_rejects_the_JSON_literal_null()
     {

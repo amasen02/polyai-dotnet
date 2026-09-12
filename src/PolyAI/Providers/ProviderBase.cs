@@ -167,6 +167,15 @@ internal abstract class ProviderBase : IPolyAIClient
         // values containing backticks or fence-like text from being reinterpreted as Markdown.
         if (IsCompleteJson(trimmed)) return trimmed;
 
+        // Count only complete delimiter lines. Triple backticks in prose or in a JSON string
+        // are content; a second fenced section (including an unrecognized language) is not.
+        var delimiterLines = System.Text.RegularExpressions.Regex.Matches(
+            trimmed,
+            "(?m)^[ \\t]*```[^\\r\\n]*\\r?$",
+            System.Text.RegularExpressions.RegexOptions.None);
+        if (delimiterLines.Count != 2)
+            throw new JsonException("Expected exactly one recognized fenced JSON payload.");
+
         var matches = System.Text.RegularExpressions.Regex.Matches(
             trimmed,
             "(?m)^[ \\t]*```(?:json)?[ \\t]*\\r?\\n(?<payload>[\\s\\S]*?)\\r?\\n^[ \\t]*```[ \\t]*\\r?$",
