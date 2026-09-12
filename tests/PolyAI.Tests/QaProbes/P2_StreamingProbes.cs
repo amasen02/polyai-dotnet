@@ -1,3 +1,4 @@
+using System.Net;
 using FluentAssertions;
 using PolyAI.Abstractions;
 using PolyAI.Errors;
@@ -328,5 +329,258 @@ public sealed class P2_StreamingProbes
             break;
 
         content.Disposed.Should().BeTrue();
+    }
+
+    private static readonly string[] Providers = ["openai", "anthropic", "gemini", "ollama", "azure-openai"];
+
+    [Theory]
+    [MemberData(nameof(ProviderNames))]
+    public async Task Streaming_completion_disposes_request_and_response_owners_and_keeps_client_usable(string providerName)
+    {
+        var handler = new OwnershipHandler(() => SuccessResponse(providerName, includeDone: true));
+        using var client = new HttpClient(handler);
+        var provider = CreateProvider(providerName, client);
+
+        await foreach (var _ in provider.StreamAsync([ChatMessage.User("Hi")])) { }
+
+        await AssertOwnershipAndClientUsable(handler, client);
+    }
+
+    [Theory]
+    [MemberData(nameof(ProviderNames))]
+    public async Task Streaming_http_error_disposes_request_and_response_owners_and_keeps_client_usable(string providerName)
+    {
+        var responseContent = new TrackedResponseContent("{\"error\":\"boom\"}", "application/json");
+        var handler = new OwnershipHandler(() => new HttpResponseMessage(System.Net.HttpStatusCode.InternalServerError)
+        {
+            Content = responseContent
+        });
+        using var client = new HttpClient(handler);
+        var provider = CreateProvider(providerName, client);
+
+        var act = async () =>
+        {
+            await foreach (var _ in provider.StreamAsync([ChatMessage.User("Hi")])) { }
+        };
+        await act.Should().ThrowAsync<ProviderException>();
+
+        await AssertOwnershipAndClientUsable(handler, client);
+        responseContent.Disposed.Should().BeTrue();
+    }
+
+    [Theory]
+    [MemberData(nameof(ProviderNames))]
+    public async Task Streaming_cancellation_disposes_request_and_response_owners_and_keeps_client_usable(string providerName)
+    {
+        var idle = new IdleAfterPrefixStream(StreamPrefix(providerName));
+        var responseContent = new StreamTrackingContent(idle);
+        var handler = new OwnershipHandler(() => new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            Content = responseContent
+        });
+        using var client = new HttpClient(handler);
+        var provider = CreateProvider(providerName, client);
+        using var cts = new CancellationTokenSource();
+        var enumerator = provider.StreamAsync([ChatMessage.User("Hi")], null, cts.Token)
+            .GetAsyncEnumerator(cts.Token);
+
+        (await enumerator.MoveNextAsync()).Should().BeTrue();
+        await cts.CancelAsync();
+        var act = async () => await enumerator.MoveNextAsync().AsTask().WaitAsync(CancelBudget);
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        await enumerator.DisposeAsync();
+
+        await AssertOwnershipAndClientUsable(handler, client);
+        responseContent.Disposed.Should().BeTrue();
+    }
+
+    [Theory]
+    [MemberData(nameof(ProviderNames))]
+    public async Task Streaming_early_break_disposes_request_and_response_owners_and_keeps_client_usable(string providerName)
+    {
+        var responseContent = new TrackedResponseContent(StreamPayload(providerName, includeDone: true));
+        var handler = new OwnershipHandler(() => new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            Content = responseContent
+        });
+        using var client = new HttpClient(handler);
+        var provider = CreateProvider(providerName, client);
+
+        await foreach (var _ in provider.StreamAsync([ChatMessage.User("Hi")]))
+            break;
+
+        await AssertOwnershipAndClientUsable(handler, client);
+        responseContent.Disposed.Should().BeTrue();
+    }
+
+    public static IEnumerable<object[]> ProviderNames => Providers.Select(name => new object[] { name });
+
+    private static IPolyAIClient CreateProvider(string providerName, HttpClient client) => providerName switch
+    {
+        "openai" => new OpenAIProvider(client, new OpenAIOptions { ApiKey = "k" }),
+        "anthropic" => new AnthropicProvider(client, new AnthropicOptions { ApiKey = "k" }),
+        "gemini" => new GeminiProvider(client, new GeminiOptions { ApiKey = "k" }),
+        "ollama" => new OllamaProvider(client, new OllamaOptions()),
+        "azure-openai" => new PolyAI.Providers.Azure.AzureOpenAIProvider(client,
+            new PolyAI.Providers.Azure.AzureOpenAIOptions
+            {
+                ApiKey = "k", Endpoint = "https://unit-test.openai.azure.com", DeploymentName = "gpt-4o"
+            }),
+        _ => throw new ArgumentOutOfRangeException(nameof(providerName))
+    };
+
+    private static HttpResponseMessage SuccessResponse(string providerName, bool includeDone)
+        => new(HttpStatusCode.OK) { Content = new TrackedResponseContent(StreamPayload(providerName, includeDone)) };
+
+    private static string StreamPrefix(string providerName) => providerName == "ollama"
+        ? "{\"message\":{\"content\":\"Hi\"},\"done\":false}\n"
+        : providerName == "anthropic"
+            ? "data: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"Hi\"}}\n"
+            : providerName == "gemini"
+                ? "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hi\"}]}}]}\n"
+                : "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n";
+
+    private static string StreamPayload(string providerName, bool includeDone)
+    {
+        var prefix = StreamPrefix(providerName);
+        if (providerName == "ollama")
+            return prefix + (includeDone ? "{\"message\":{\"content\":\"\"},\"done\":true}\n" : string.Empty);
+
+        var second = providerName == "anthropic"
+            ? "data: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"!\"}}\n"
+            : providerName == "gemini"
+                ? "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"!\"}]}}]}\n"
+                : "data: {\"choices\":[{\"delta\":{\"content\":\"!\"}}]}\n";
+        return prefix + second + (includeDone ? "data: [DONE]\n" : string.Empty);
+    }
+
+    private static async Task AssertOwnershipAndClientUsable(OwnershipHandler handler, HttpClient client)
+    {
+        handler.RequestContent.Should().NotBeNull();
+        handler.RequestContent!.Disposed.Should().BeTrue("the iterator owns and disposes its request content");
+        handler.ResponseContent.Should().NotBeNull();
+        handler.ResponseContent!.Disposed.Should().BeTrue("the iterator owns and disposes its response content");
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "https://unit.test/health");
+        using var response = await client.SendAsync(request);
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "disposing a stream must not dispose the injected HttpClient");
+    }
+
+    private sealed class OwnershipHandler : HttpMessageHandler
+    {
+        private readonly Func<HttpResponseMessage> _response;
+        public OwnershipTrackingContent? RequestContent { get; private set; }
+        public ITrackedContent? ResponseContent { get; private set; }
+        private int _callCount;
+
+        public OwnershipHandler(Func<HttpResponseMessage> response) => _response = response;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.Content is not null)
+            {
+                RequestContent = new OwnershipTrackingContent(request.Content);
+                request.Content = RequestContent;
+            }
+
+            var response = Interlocked.Increment(ref _callCount) == 1
+                ? _response()
+                : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok") };
+            if (ResponseContent is null)
+                ResponseContent = response.Content as ITrackedContent;
+            return Task.FromResult(response);
+        }
+    }
+
+    private interface ITrackedContent
+    {
+        bool Disposed { get; }
+    }
+
+    private sealed class OwnershipTrackingContent : HttpContent, ITrackedContent
+    {
+        private readonly HttpContent _inner;
+        public bool Disposed { get; private set; }
+
+        public OwnershipTrackingContent(HttpContent inner) => _inner = inner;
+
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+            => _inner.CopyToAsync(stream, context, CancellationToken.None);
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = _inner.Headers.ContentLength ?? -1;
+            return length >= 0;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                Disposed = true;
+                _inner.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+    }
+
+    private sealed class StreamTrackingContent : HttpContent, ITrackedContent
+    {
+        private readonly Stream _stream;
+        public bool Disposed { get; private set; }
+
+        public StreamTrackingContent(Stream stream)
+        {
+            _stream = stream;
+            Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/event-stream");
+        }
+
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+            => _stream.CopyToAsync(stream);
+
+        protected override Task<Stream> CreateContentReadStreamAsync() => Task.FromResult(_stream);
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = -1;
+            return false;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                Disposed = true;
+                _stream.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+    }
+
+    private sealed class TrackedResponseContent : HttpContent, ITrackedContent
+    {
+        private readonly byte[] _payload;
+        public bool Disposed { get; private set; }
+
+        public TrackedResponseContent(string payload, string mediaType = "text/event-stream")
+        {
+            _payload = System.Text.Encoding.UTF8.GetBytes(payload);
+            Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(mediaType);
+        }
+
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+            => stream.WriteAsync(_payload).AsTask();
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = _payload.Length;
+            return true;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) Disposed = true;
+            base.Dispose(disposing);
+        }
     }
 }

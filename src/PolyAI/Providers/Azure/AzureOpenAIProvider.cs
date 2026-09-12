@@ -25,6 +25,9 @@ internal sealed class AzureOpenAIProvider : IPolyAIClient
             throw new PolyAIException("Azure OpenAI API key must not be empty. Set AzureOpenAIOptions.ApiKey.");
         if (string.IsNullOrWhiteSpace(options.Endpoint))
             throw new PolyAIException("Azure OpenAI endpoint must not be empty. Set AzureOpenAIOptions.Endpoint.");
+        if (!Uri.TryCreate(options.Endpoint, UriKind.Absolute, out var endpoint)
+            || (endpoint.Scheme != Uri.UriSchemeHttp && endpoint.Scheme != Uri.UriSchemeHttps))
+            throw new PolyAIException("Azure OpenAI endpoint must be an absolute HTTP(S) URI. Set AzureOpenAIOptions.Endpoint.");
         if (string.IsNullOrWhiteSpace(options.DeploymentName))
             throw new PolyAIException("Azure OpenAI deployment name must not be empty. Set AzureOpenAIOptions.DeploymentName.");
 
@@ -41,7 +44,31 @@ internal sealed class AzureOpenAIProvider : IPolyAIClient
         => _inner.ChatAsync(messages, options, cancellationToken);
 
     public IAsyncEnumerable<string> StreamAsync(IList<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
-        => _inner.StreamAsync(messages, options, cancellationToken);
+        => StreamCoreAsync(messages, options, cancellationToken);
+
+    private async IAsyncEnumerable<string> StreamCoreAsync(
+        IList<ChatMessage> messages,
+        ChatOptions? options,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await using var enumerator = _inner.StreamAsync(messages, options, cancellationToken)
+            .GetAsyncEnumerator(cancellationToken);
+        while (true)
+        {
+            bool hasNext;
+            try
+            {
+                hasNext = await enumerator.MoveNextAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or IOException)
+            {
+                throw new ProviderException(ProviderName, "streaming failed.", ex);
+            }
+
+            if (!hasNext) yield break;
+            yield return enumerator.Current;
+        }
+    }
 
     public Task<T> StructuredAsync<T>(IList<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) where T : class
         => _inner.StructuredAsync<T>(messages, options, cancellationToken);

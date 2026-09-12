@@ -201,4 +201,28 @@ public sealed class P5_DiAndAzureAuthProbes
         act.Should().Throw<PolyAIException>(
             "AddFactory overwrites by key, so the first registration vanishes without a word");
     }
+
+    [Fact]
+    public async Task P5_12_Azure_credentials_do_not_leak_into_an_unrelated_named_client()
+    {
+        var azureTerminal = new TerminalHandler();
+        var openAiTerminal = new TerminalHandler();
+        var services = new ServiceCollection();
+        services.AddPolyAI(b => b
+            .UseAzureOpenAI("azure-secret", "https://r.openai.azure.com", "gpt-4o")
+            .UseOpenAI("openai-secret"));
+        services.AddHttpClient("polyai-azure-openai")
+            .ConfigurePrimaryHttpMessageHandler(() => azureTerminal);
+        services.AddHttpClient("polyai-openai")
+            .ConfigurePrimaryHttpMessageHandler(() => openAiTerminal);
+
+        using var serviceProvider = services.BuildServiceProvider();
+        var router = serviceProvider.GetRequiredService<IPolyAIRouter>();
+        await router.GetProvider("azure-openai").ChatAsync([ChatMessage.User("Hi")]);
+        await router.GetProvider("openai").ChatAsync([ChatMessage.User("Hi")]);
+
+        azureTerminal.SeenApiKeys.Should().Equal("azure-secret");
+        openAiTerminal.SeenApiKeys.Should().BeEmpty(
+            "the Azure auth handler belongs only to the Azure named client and must not mutate OpenAI requests");
+    }
 }

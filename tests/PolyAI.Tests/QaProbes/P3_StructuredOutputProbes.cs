@@ -1,6 +1,7 @@
 using FluentAssertions;
 using PolyAI.Abstractions;
 using PolyAI.Errors;
+using PolyAI.Providers;
 using PolyAI.Providers.Anthropic;
 using PolyAI.Providers.OpenAI;
 using PolyAI.Tests.QaProbes.Fakes;
@@ -24,6 +25,17 @@ public sealed class P3_StructuredOutputProbes
         public string? City { get; set; }
         public string? CityName { get; set; }
         public int TemperatureCelsius { get; set; }
+    }
+
+    [Fact]
+    public async Task StructuredAsync_accepts_a_complete_raw_JSON_array()
+    {
+        var provider = ProviderReturning("[{\"city\":\"Colombo\"},{\"city\":\"Kandy\"}]");
+
+        var result = await provider.StructuredAsync<WeatherReport[]>([ChatMessage.User("weather?")]);
+
+        result.Should().HaveCount(2);
+        result.Select(report => report.City).Should().Equal("Colombo", "Kandy");
     }
 
     private static OpenAIProvider ProviderReturning(string assistantContent)
@@ -104,6 +116,26 @@ public sealed class P3_StructuredOutputProbes
     }
 
     [Fact]
+    public async Task StructuredAsync_handles_a_CRLF_fenced_JSON_block_with_surrounding_prose()
+    {
+        var provider = ProviderReturning("Before:\r\n```json\r\n{\"city\":\"Colombo\"}\r\n```\r\nAfter.");
+
+        var result = await provider.StructuredAsync<WeatherReport>([ChatMessage.User("weather?")]);
+
+        result.City.Should().Be("Colombo");
+    }
+
+    [Fact]
+    public async Task StructuredAsync_accepts_fenced_JSON_with_fence_text_inside_a_string()
+    {
+        var provider = ProviderReturning("```json\n{\"city\":\"```json text\"}\n```\n");
+
+        var result = await provider.StructuredAsync<WeatherReport>([ChatMessage.User("weather?")]);
+
+        result.City.Should().Be("```json text");
+    }
+
+    [Fact]
     public async Task StructuredAsync_prefers_complete_raw_JSON_with_fence_text_inside_a_string()
     {
         var provider = ProviderReturning("""{"city":"```json not a fence"}""");
@@ -117,6 +149,16 @@ public sealed class P3_StructuredOutputProbes
     public async Task StructuredAsync_rejects_multiple_fenced_payloads()
     {
         var provider = ProviderReturning("```json\n{\"city\":\"A\"}\n```\n```json\n{\"city\":\"B\"}\n```");
+
+        var act = async () => await provider.StructuredAsync<WeatherReport>([ChatMessage.User("weather?")]);
+
+        await act.Should().ThrowAsync<PolyAIException>();
+    }
+
+    [Fact]
+    public async Task StructuredAsync_rejects_the_JSON_literal_null()
+    {
+        var provider = ProviderReturning("null");
 
         var act = async () => await provider.StructuredAsync<WeatherReport>([ChatMessage.User("weather?")]);
 
@@ -202,6 +244,59 @@ public sealed class P3_StructuredOutputProbes
             "RFC 9110 allows Retry-After as an HTTP-date; only Delta is read, so the hint is lost");
     }
 
+    [Fact]
+    public void ParseRetryAfter_uses_the_exact_clock_for_a_future_HTTP_date()
+    {
+        var now = new DateTimeOffset(2030, 1, 2, 3, 4, 5, TimeSpan.Zero);
+        var future = now.AddMinutes(7);
+        var header = new System.Net.Http.Headers.RetryConditionHeaderValue(future);
+
+        ProviderBase.ParseRetryAfter(header, now).Should().Be(TimeSpan.FromMinutes(7));
+    }
+
+    [Fact]
+    public void ParseRetryAfter_clamps_equal_and_past_HTTP_dates_to_zero()
+    {
+        var now = new DateTimeOffset(2030, 1, 2, 3, 4, 5, TimeSpan.Zero);
+
+        ProviderBase.ParseRetryAfter(
+            new System.Net.Http.Headers.RetryConditionHeaderValue(now), now).Should().Be(TimeSpan.Zero);
+        ProviderBase.ParseRetryAfter(
+            new System.Net.Http.Headers.RetryConditionHeaderValue(now.AddSeconds(-1)), now)
+            .Should().Be(TimeSpan.Zero);
+    }
+
+    [Fact]
+    public void ParseRetryAfter_preserves_delta_seconds_without_a_clock_rounding()
+    {
+        var now = new DateTimeOffset(2030, 1, 2, 3, 4, 5, TimeSpan.Zero);
+        var delta = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(123));
+
+        ProviderBase.ParseRetryAfter(delta, now).Should().Be(TimeSpan.FromSeconds(123));
+    }
+
+    [Fact]
+    public void ParseRetryAfter_returns_null_for_absent_or_malformed_headers()
+    {
+        var now = DateTimeOffset.UtcNow;
+        System.Net.Http.Headers.RetryConditionHeaderValue.TryParse("not-a-retry-after", out var malformed)
+            .Should().BeFalse();
+
+        ProviderBase.ParseRetryAfter(null, now).Should().BeNull();
+        ProviderBase.ParseRetryAfter(malformed, now).Should().BeNull();
+    }
+
+    [Fact]
+    public void ParseRetryAfter_preserves_a_large_valid_future_date()
+    {
+        var now = new DateTimeOffset(2030, 1, 2, 3, 4, 5, TimeSpan.Zero);
+        var future = now.AddYears(10);
+
+        ProviderBase.ParseRetryAfter(
+            new System.Net.Http.Headers.RetryConditionHeaderValue(future), now)
+            .Should().Be(TimeSpan.FromDays(3652));
+    }
+
     // ---------------------------------------------------------------- P3.10
     // Azure failures must be attributable to Azure. AzureOpenAIProvider delegates to an inner
     // OpenAIProvider, and it is the inner provider's name that reaches the exception.
@@ -222,5 +317,76 @@ public sealed class P3_StructuredOutputProbes
         var ex = await act.Should().ThrowAsync<ProviderAuthException>();
         ex.Which.Provider.Should().Be("azure-openai",
             "an operator reading this exception must be able to tell which credential failed");
+    }
+
+    [Fact]
+    public async Task Azure_status_failure_preserves_provider_attribution()
+    {
+        var provider = new PolyAI.Providers.Azure.AzureOpenAIProvider(
+            new HttpClient(CapturingHandler.Json("{\"error\":\"nope\"}", System.Net.HttpStatusCode.BadGateway)),
+            new PolyAI.Providers.Azure.AzureOpenAIOptions
+            {
+                ApiKey = "k", Endpoint = "https://unit-test.openai.azure.com", DeploymentName = "gpt-4o"
+            });
+
+        var act = async () => await provider.ChatAsync([ChatMessage.User("Hi")]);
+
+        var ex = await act.Should().ThrowAsync<ProviderException>();
+        ex.Which.Provider.Should().Be("azure-openai");
+        ex.Which.StatusCode.Should().Be(502);
+    }
+
+    [Fact]
+    public async Task Azure_malformed_response_preserves_provider_attribution()
+    {
+        var provider = new PolyAI.Providers.Azure.AzureOpenAIProvider(
+            new HttpClient(CapturingHandler.Json("{\"choices\":[truncated")),
+            new PolyAI.Providers.Azure.AzureOpenAIOptions
+            {
+                ApiKey = "k", Endpoint = "https://unit-test.openai.azure.com", DeploymentName = "gpt-4o"
+            });
+
+        var act = async () => await provider.ChatAsync([ChatMessage.User("Hi")]);
+
+        var ex = await act.Should().ThrowAsync<ProviderException>();
+        ex.Which.Provider.Should().Be("azure-openai");
+    }
+
+    [Fact]
+    public async Task Azure_stream_failure_preserves_provider_attribution()
+    {
+        var provider = new PolyAI.Providers.Azure.AzureOpenAIProvider(
+            new HttpClient(new CapturingHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StreamContent(new ThrowingReadStream())
+            })),
+            new PolyAI.Providers.Azure.AzureOpenAIOptions
+            {
+                ApiKey = "k", Endpoint = "https://unit-test.openai.azure.com", DeploymentName = "gpt-4o"
+            });
+
+        var act = async () =>
+        {
+            await foreach (var _ in provider.StreamAsync([ChatMessage.User("Hi")])) { }
+        };
+
+        var ex = await act.Should().ThrowAsync<ProviderException>();
+        ex.Which.Provider.Should().Be("azure-openai");
+    }
+
+    private sealed class ThrowingReadStream : Stream
+    {
+        public override int Read(byte[] buffer, int offset, int count) => throw new IOException("stream broke");
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+            => ValueTask.FromException<int>(new IOException("stream broke"));
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => 0; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 }
