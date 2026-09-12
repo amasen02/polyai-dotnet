@@ -13,6 +13,11 @@ namespace PolyAI.Tests.QaProbes;
 /// </summary>
 public sealed class P3_StructuredOutputProbes
 {
+    public sealed class ExplicitNameReport
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("city_label")]
+        public string? CityName { get; set; }
+    }
     /// <summary>Two-word property names — the ordinary case for a real DTO.</summary>
     public sealed class WeatherReport
     {
@@ -96,6 +101,36 @@ public sealed class P3_StructuredOutputProbes
         var result = await provider.StructuredAsync<WeatherReport>([ChatMessage.User("weather?")]);
 
         result.City.Should().Be("Colombo");
+    }
+
+    [Fact]
+    public async Task StructuredAsync_prefers_complete_raw_JSON_with_fence_text_inside_a_string()
+    {
+        var provider = ProviderReturning("""{"city":"```json not a fence"}""");
+
+        var result = await provider.StructuredAsync<WeatherReport>([ChatMessage.User("weather?")]);
+
+        result.City.Should().Be("```json not a fence");
+    }
+
+    [Fact]
+    public async Task StructuredAsync_rejects_multiple_fenced_payloads()
+    {
+        var provider = ProviderReturning("```json\n{\"city\":\"A\"}\n```\n```json\n{\"city\":\"B\"}\n```");
+
+        var act = async () => await provider.StructuredAsync<WeatherReport>([ChatMessage.User("weather?")]);
+
+        await act.Should().ThrowAsync<PolyAIException>();
+    }
+
+    [Fact]
+    public async Task StructuredAsync_preserves_explicit_json_property_names()
+    {
+        var provider = ProviderReturning("""{"city_label":"Colombo"}""");
+
+        var result = await provider.StructuredAsync<ExplicitNameReport>([ChatMessage.User("weather?")]);
+
+        result.CityName.Should().Be("Colombo");
     }
 
     // ---------------------------------------------------------------- P3.6
