@@ -48,10 +48,10 @@ internal sealed class OpenAIProvider : ProviderBase
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var body = BuildRequestBody(messages, options, stream: true);
-        var request = BuildRequest(JsonSerializer.Serialize(body, JsonOptions));
+        using var request = BuildRequest(JsonSerializer.Serialize(body, JsonOptions));
         request.Headers.Add("Accept", "text/event-stream");
 
-        var response = await _http
+        using var response = await _http
             .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
             .ConfigureAwait(false);
 

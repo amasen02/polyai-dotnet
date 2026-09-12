@@ -292,7 +292,7 @@ public sealed class P2_StreamingProbes
     // ---------------------------------------------------------------- P2.9
     // StreamAsync never disposes the HttpResponseMessage. On the error path the response is
     // abandoned entirely — the connection is not returned to the pool.
-    [Fact(Skip = "Documented defect: StreamAsync does not dispose HttpResponseMessage. Tracked in GRO-DISPOSAL.")]
+    [Fact]
     public async Task P2_9_A_failed_stream_request_disposes_its_response()
     {
         var content = new DisposeTrackingContent("{\"error\":\"boom\"}", "application/json");
@@ -315,7 +315,7 @@ public sealed class P2_StreamingProbes
     // ---------------------------------------------------------------- P2.10
     // Same leak on the success path when the consumer stops early — the common
     // 'take the first N tokens then break' pattern.
-    [Fact(Skip = "Documented defect: StreamAsync does not dispose HttpResponseMessage. Tracked in GRO-DISPOSAL.")]
+    [Fact]
     public async Task P2_10_Breaking_out_of_a_stream_early_disposes_the_response()
     {
         var content = new DisposeTrackingContent(

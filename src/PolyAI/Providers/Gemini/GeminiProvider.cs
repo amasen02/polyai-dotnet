@@ -56,10 +56,10 @@ internal sealed class GeminiProvider : ProviderBase
         var model = options?.Model ?? _options.DefaultModel;
         var body = BuildRequestBody(messages, options);
 
-        var request = CreateRequest(model, stream: true, body);
+        using var request = CreateRequest(model, stream: true, body);
         request.Headers.Add("Accept", "text/event-stream");
 
-        var response = await _http
+        using var response = await _http
             .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
             .ConfigureAwait(false);
 

@@ -48,12 +48,12 @@ internal sealed class OllamaProvider : ProviderBase
         var endpoint = $"{_options.BaseUrl.TrimEnd('/')}/api/chat";
         var body = BuildRequestBody(messages, options, stream: true);
 
-        var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+        using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
             Content = new StringContent(JsonSerializer.Serialize(body, JsonOptions), System.Text.Encoding.UTF8, "application/json")
         };
 
-        var response = await _http
+        using var response = await _http
             .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
             .ConfigureAwait(false);
 
