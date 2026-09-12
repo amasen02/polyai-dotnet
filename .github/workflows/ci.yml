@@ -71,6 +71,16 @@ jobs:
           consumer_dir="$(mktemp -d)"
           dotnet new console --framework net9.0 --output "$consumer_dir" --name PolyAI.PackageConsumer --no-restore
           dotnet add "$consumer_dir/PolyAI.PackageConsumer.csproj" package PolyAI.DotNet --version 1.0.0 --source "$GITHUB_WORKSPACE/artifacts" --no-restore
+          cat > "$consumer_dir/NuGet.Config" <<EOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="local-package-under-test" value="$GITHUB_WORKSPACE/artifacts" />
+              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+            </packageSources>
+          </configuration>
+          EOF
           cat > "$consumer_dir/Program.cs" <<'EOF'
           using Microsoft.Extensions.DependencyInjection;
           using PolyAI.Extensions;
@@ -79,7 +89,7 @@ jobs:
           services.AddPolyAI(options => options.UseOllama());
           Console.WriteLine("PolyAI local package consumer compiled.");
           EOF
-          dotnet restore "$consumer_dir" --source "$GITHUB_WORKSPACE/artifacts" --source https://api.nuget.org/v3/index.json
+          dotnet restore "$consumer_dir/PolyAI.PackageConsumer.csproj" --configfile "$consumer_dir/NuGet.Config"
           dotnet build "$consumer_dir" --no-restore -warnaserror
       - name: Upload package artifact
         uses: actions/upload-artifact@v7
