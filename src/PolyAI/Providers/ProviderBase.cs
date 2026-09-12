@@ -46,9 +46,10 @@ internal abstract class ProviderBase : IPolyAIClient
 
         var response = await ChatAsync(augmented, options, cancellationToken).ConfigureAwait(false);
 
-        var json = ExtractJson(response.Content);
+        var json = response.Content;
         try
         {
+            json = ExtractJson(response.Content);
             return JsonSerializer.Deserialize<T>(json, StructuredJsonOptions)
                 ?? throw new PolyAIException($"Provider {ProviderName} returned null when deserializing {typeof(T).Name}.");
         }
@@ -162,19 +163,30 @@ internal abstract class ProviderBase : IPolyAIClient
     private static string ExtractJson(string text)
     {
         var trimmed = text.Trim();
+        // A valid raw JSON value wins before considering Markdown. This prevents JSON string
+        // values containing backticks or fence-like text from being reinterpreted as Markdown.
+        if (IsCompleteJson(trimmed)) return trimmed;
+
+        if (System.Text.RegularExpressions.Regex.Matches(trimmed, "```", System.Text.RegularExpressions.RegexOptions.None).Count != 2)
+            throw new JsonException("Expected exactly one recognized fenced JSON payload.");
+
         var matches = System.Text.RegularExpressions.Regex.Matches(
             trimmed,
-            "```(?:json)?[ \\t]*\\r?\\n(?<payload>.*?)\\r?\\n```",
-            System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-
-        if (matches.Count == 0) return trimmed;
+            "(?m)^[ \\t]*```(?:json)?[ \\t]*\\r?\\n(?<payload>[\\s\\S]*?)\\r?\\n^[ \\t]*```[ \\t]*$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
         if (matches.Count == 1)
         {
             var payload = matches[0].Groups["payload"].Value.Trim();
-            if (!string.IsNullOrEmpty(payload)) return payload;
+            if (!string.IsNullOrEmpty(payload) && IsCompleteJson(payload)) return payload;
         }
 
-        throw new PolyAIException("Provider returned invalid JSON for structured output: expected one complete raw JSON value or one recognized fenced JSON payload.");
+        throw new JsonException("Expected one complete raw JSON value or one recognized fenced JSON payload.");
+    }
+
+    private static bool IsCompleteJson(string value)
+    {
+        try { using var _ = JsonDocument.Parse(value); return true; }
+        catch (JsonException) { return false; }
     }
 }
