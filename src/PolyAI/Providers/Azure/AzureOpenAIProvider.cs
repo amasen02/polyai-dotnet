@@ -34,7 +34,7 @@ internal sealed class AzureOpenAIProvider : IPolyAIClient
             ApiKey = options.ApiKey,
             BaseUrl = baseUrl,
             DefaultModel = options.DeploymentName,
-        });
+        }, providerName: ProviderName);
     }
 
     public Task<ChatResponse> ChatAsync(IList<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)

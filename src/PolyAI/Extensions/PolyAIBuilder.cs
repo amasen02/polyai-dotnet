@@ -156,5 +156,8 @@ public sealed class PolyAIBuilder
     }
 
     private void AddFactory(string name, Func<IServiceProvider, IPolyAIClient> factory)
-        => _factories[name] = factory;
+    {
+        if (!_factories.TryAdd(name, factory))
+            throw new PolyAIException($"Provider '{name}' is already registered.");
+    }
 }

@@ -15,6 +15,11 @@ internal abstract class ProviderBase : IPolyAIClient
         WriteIndented = false,
     };
 
+    private static readonly JsonSerializerOptions StructuredJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
     public abstract string ProviderName { get; }
 
     public abstract Task<ChatResponse> ChatAsync(
@@ -44,7 +49,7 @@ internal abstract class ProviderBase : IPolyAIClient
         var json = ExtractJson(response.Content);
         try
         {
-            return JsonSerializer.Deserialize<T>(json, JsonOptions)
+            return JsonSerializer.Deserialize<T>(json, StructuredJsonOptions)
                 ?? throw new PolyAIException($"Provider {ProviderName} returned null when deserializing {typeof(T).Name}.");
         }
         catch (JsonException ex)
@@ -112,8 +117,7 @@ internal abstract class ProviderBase : IPolyAIClient
 
         if (statusCode is 429)
         {
-            TimeSpan? retryAfter = null;
-            if (response.Headers.RetryAfter?.Delta is { } delta) retryAfter = delta;
+            var retryAfter = ParseRetryAfter(response.Headers.RetryAfter, DateTimeOffset.UtcNow);
             throw new ProviderRateLimitException(ProviderName, $"{context}: rate limit exceeded.", retryAfter);
         }
 
@@ -146,17 +150,31 @@ internal abstract class ProviderBase : IPolyAIClient
         }
     }
 
+    internal static TimeSpan? ParseRetryAfter(System.Net.Http.Headers.RetryConditionHeaderValue? value, DateTimeOffset now)
+    {
+        if (value?.Delta is { } delta) return delta < TimeSpan.Zero ? TimeSpan.Zero : delta;
+        if (value?.Date is not { } date) return null;
+
+        var remaining = date - now;
+        return remaining <= TimeSpan.Zero ? TimeSpan.Zero : remaining;
+    }
+
     private static string ExtractJson(string text)
     {
         var trimmed = text.Trim();
-        // Strip markdown code fences if present
-        if (trimmed.StartsWith("```", StringComparison.Ordinal))
+        var matches = System.Text.RegularExpressions.Regex.Matches(
+            trimmed,
+            "```(?:json)?[ \\t]*\\r?\\n(?<payload>.*?)\\r?\\n```",
+            System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        if (matches.Count == 0) return trimmed;
+
+        if (matches.Count == 1)
         {
-            var firstNewline = trimmed.IndexOf('\n');
-            if (firstNewline >= 0) trimmed = trimmed[(firstNewline + 1)..];
-            if (trimmed.EndsWith("```", StringComparison.Ordinal))
-                trimmed = trimmed[..^3].TrimEnd();
+            var payload = matches[0].Groups["payload"].Value.Trim();
+            if (!string.IsNullOrEmpty(payload)) return payload;
         }
-        return trimmed;
+
+        throw new PolyAIException("Provider returned invalid JSON for structured output: expected one complete raw JSON value or one recognized fenced JSON payload.");
     }
 }

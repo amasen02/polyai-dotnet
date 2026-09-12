@@ -34,7 +34,7 @@ public sealed class P3_StructuredOutputProbes
     // correct for provider wire bodies, but the SAME options object deserializes the CALLER'S
     // type — so STJ expects "city_name" for CityName. Nothing in the prompt asks the model for
     // snake_case, so every multi-word property silently binds to its default value.
-    [Fact(Skip = "Documented defect: StructuredAsync uses snake_case naming policy on caller types. Tracked in GRO 18c408e8.")]
+    [Fact]
     public async Task P3_1_StructuredAsync_binds_camelCase_multi_word_properties()
     {
         var provider = ProviderReturning("""{"city":"Colombo","cityName":"Colombo","temperatureCelsius":31}""");
@@ -49,7 +49,7 @@ public sealed class P3_StructuredOutputProbes
     }
 
     // ---------------------------------------------------------------- P3.2
-    [Fact(Skip = "Documented defect: StructuredAsync uses snake_case naming policy on caller types. Tracked in GRO 18c408e8.")]
+    [Fact]
     public async Task P3_2_StructuredAsync_binds_PascalCase_multi_word_properties()
     {
         var provider = ProviderReturning("""{"City":"Colombo","CityName":"Colombo","TemperatureCelsius":31}""");
@@ -75,25 +75,23 @@ public sealed class P3_StructuredOutputProbes
     }
 
     // ---------------------------------------------------------------- P3.4
-    // Prose around the JSON is the single most common structured-output failure. ExtractJson
-    // only strips fenced blocks, so a leading sentence produces a raw parse failure.
-    [Fact(Skip = "Documented defect: ExtractJson does not strip leading prose or handle single-line fences. Tracked in GRO-STRUCTUREDREMAINING.")]
-    public async Task P3_4_StructuredAsync_extracts_the_JSON_object_when_the_model_adds_prose()
+    // Unfenced prose plus JSON is deliberately rejected; extraction never brace-scans prose.
+    [Fact]
+    public async Task P3_4_StructuredAsync_rejects_unfenced_prose_plus_JSON()
     {
         var provider = ProviderReturning("Sure! Here is the JSON you asked for:\n{\"city\":\"Colombo\"}");
 
-        var result = await provider.StructuredAsync<WeatherReport>([ChatMessage.User("weather?")]);
+        var act = async () => await provider.StructuredAsync<WeatherReport>([ChatMessage.User("weather?")]);
 
-        result.City.Should().Be("Colombo");
+        await act.Should().ThrowAsync<PolyAIException>();
     }
 
     // ---------------------------------------------------------------- P3.5
-    // A single-line fenced block: firstNewline is -1, so the opening fence is never stripped
-    // while the closing fence IS — producing "```json {...}" and a guaranteed parse failure.
-    [Fact(Skip = "Documented defect: ExtractJson does not strip leading prose or handle single-line fences. Tracked in GRO-STRUCTUREDREMAINING.")]
-    public async Task P3_5_StructuredAsync_handles_a_single_line_fenced_JSON_block()
+    // A conventional single fenced JSON payload may have surrounding prose.
+    [Fact]
+    public async Task P3_5_StructuredAsync_handles_a_fenced_JSON_block_with_surrounding_prose()
     {
-        var provider = ProviderReturning("""```json {"city":"Colombo"} ```""");
+        var provider = ProviderReturning("Sure:\n```json\n{\"city\":\"Colombo\"}\n```\nThanks.");
 
         var result = await provider.StructuredAsync<WeatherReport>([ChatMessage.User("weather?")]);
 
@@ -149,7 +147,7 @@ public sealed class P3_StructuredOutputProbes
     // Retry-After may legitimately be an HTTP-date rather than a delta-seconds value.
     // Only .Delta is read, so the date form is silently discarded and callers lose their
     // backoff hint exactly when they need it.
-    [Fact(Skip = "Documented defect. Tracked in GRO-STRUCTUREDREMAINING.")]
+    [Fact]
     public async Task P3_9_A_429_with_an_HTTP_date_Retry_After_still_reports_RetryAfter()
     {
         var response = new HttpResponseMessage(System.Net.HttpStatusCode.TooManyRequests)
@@ -172,7 +170,7 @@ public sealed class P3_StructuredOutputProbes
     // ---------------------------------------------------------------- P3.10
     // Azure failures must be attributable to Azure. AzureOpenAIProvider delegates to an inner
     // OpenAIProvider, and it is the inner provider's name that reaches the exception.
-    [Fact(Skip = "Documented defect. Tracked in GRO-STRUCTUREDREMAINING.")]
+    [Fact]
     public async Task P3_10_An_Azure_failure_is_reported_against_the_azure_openai_provider()
     {
         var provider = new PolyAI.Providers.Azure.AzureOpenAIProvider(

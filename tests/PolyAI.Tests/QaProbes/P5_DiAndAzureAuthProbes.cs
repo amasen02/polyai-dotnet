@@ -98,7 +98,7 @@ public sealed class P5_DiAndAzureAuthProbes
     // ---------------------------------------------------------------- P5.5
     // Missing api-key — QA scope. The handler must refuse rather than send an unauthenticated
     // request whose failure surfaces later as an opaque 401 from Azure.
-    [Fact(Skip = "Documented defect: AzureAuthHandler and DI configuration validation gaps. Tracked in GRO-DIAZURE.")]
+    [Fact]
     public void P5_5_AzureAuthHandler_rejects_an_empty_api_key_at_construction()
     {
         var act = () => new AzureAuthHandler(string.Empty, "2024-02-01");
@@ -109,7 +109,7 @@ public sealed class P5_DiAndAzureAuthProbes
 
     // ---------------------------------------------------------------- P5.6
     // Missing api-version. An empty version yields "?api-version=" and an Azure 400.
-    [Fact(Skip = "Documented defect: AzureAuthHandler and DI configuration validation gaps. Tracked in GRO-DIAZURE.")]
+    [Fact]
     public void P5_6_AzureAuthHandler_rejects_an_empty_api_version_at_construction()
     {
         var act = () => new AzureAuthHandler("azure-key", string.Empty);
@@ -189,7 +189,7 @@ public sealed class P5_DiAndAzureAuthProbes
 
     // ---------------------------------------------------------------- P5.11
     // Registering the same provider twice silently keeps only the last configuration.
-    [Fact(Skip = "Documented defect: AzureAuthHandler and DI configuration validation gaps. Tracked in GRO-DIAZURE.")]
+    [Fact]
     public void P5_11_Registering_the_same_provider_twice_is_not_silently_ignored()
     {
         var services = new ServiceCollection();
