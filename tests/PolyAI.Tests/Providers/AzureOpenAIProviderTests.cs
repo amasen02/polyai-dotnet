@@ -68,6 +68,19 @@ public sealed class AzureOpenAIProviderTests
     }
 
     [Fact]
+    public void Constructor_throws_when_endpoint_is_not_an_absolute_http_uri()
+    {
+        var act = () => new AzureOpenAIProvider(new HttpClient(), new AzureOpenAIOptions
+        {
+            ApiKey = "key",
+            Endpoint = "not a uri",
+            DeploymentName = "gpt-4o-mini",
+        });
+
+        act.Should().Throw<PolyAIException>().WithMessage("*absolute HTTP(S) URI*");
+    }
+
+    [Fact]
     public void Constructor_throws_when_deployment_is_empty()
     {
         var act = () => new AzureOpenAIProvider(new HttpClient(), new AzureOpenAIOptions

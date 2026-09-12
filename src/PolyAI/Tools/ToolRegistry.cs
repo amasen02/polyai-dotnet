@@ -69,6 +69,7 @@ public static class ToolRegistry
         ArgumentNullException.ThrowIfNull(type);
 
         var tools = new List<ToolDefinition>();
+        var names = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static))
         {
@@ -76,6 +77,8 @@ public static class ToolRegistry
             if (toolAttr is null) continue;
 
             var name = toolAttr.Name ?? ToSnakeCase(method.Name);
+            if (!names.Add(name))
+                throw new PolyAIException($"Tool type '{type.Name}' declares duplicate tool name '{name}'. Use explicit unique names.");
             var parameters = BuildParameters(method);
             tools.Add(new ToolDefinition(name, toolAttr.Description, parameters));
         }
@@ -159,7 +162,9 @@ public static class ToolRegistry
         for (var i = 0; i < name.Length; i++)
         {
             var c = name[i];
-            if (char.IsUpper(c) && i > 0) result.Append('_');
+            if (char.IsUpper(c) && i > 0
+                && (char.IsLower(name[i - 1]) || (i + 1 < name.Length && char.IsLower(name[i + 1]))))
+                result.Append('_');
             result.Append(char.ToLowerInvariant(c));
         }
         return result.ToString();

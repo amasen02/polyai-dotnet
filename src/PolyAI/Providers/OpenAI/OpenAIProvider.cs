@@ -14,10 +14,11 @@ internal sealed class OpenAIProvider : ProviderBase
     private readonly HttpClient _http;
     private readonly OpenAIOptions _options;
     private readonly string _chatEndpoint;
+    private readonly string _providerName;
 
-    public override string ProviderName => "openai";
+    public override string ProviderName => _providerName;
 
-    public OpenAIProvider(HttpClient http, OpenAIOptions options)
+    public OpenAIProvider(HttpClient http, OpenAIOptions options, string providerName = "openai")
     {
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(options);
@@ -26,6 +27,7 @@ internal sealed class OpenAIProvider : ProviderBase
 
         _http = http;
         _options = options;
+        _providerName = providerName;
         _chatEndpoint = $"{options.BaseUrl.TrimEnd('/')}/chat/completions";
     }
 
@@ -48,10 +50,10 @@ internal sealed class OpenAIProvider : ProviderBase
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var body = BuildRequestBody(messages, options, stream: true);
-        var request = BuildRequest(JsonSerializer.Serialize(body, JsonOptions));
+        using var request = BuildRequest(JsonSerializer.Serialize(body, JsonOptions));
         request.Headers.Add("Accept", "text/event-stream");
 
-        var response = await _http
+        using var response = await _http
             .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
             .ConfigureAwait(false);
 

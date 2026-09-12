@@ -12,6 +12,8 @@ internal sealed class AzureAuthHandler : DelegatingHandler
 
     public AzureAuthHandler(string apiKey, string apiVersion)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(apiKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(apiVersion);
         _apiKey = apiKey;
         _apiVersion = apiVersion;
     }

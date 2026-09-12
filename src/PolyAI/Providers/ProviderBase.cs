@@ -15,6 +15,11 @@ internal abstract class ProviderBase : IPolyAIClient
         WriteIndented = false,
     };
 
+    private static readonly JsonSerializerOptions StructuredJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
     public abstract string ProviderName { get; }
 
     public abstract Task<ChatResponse> ChatAsync(
@@ -41,10 +46,11 @@ internal abstract class ProviderBase : IPolyAIClient
 
         var response = await ChatAsync(augmented, options, cancellationToken).ConfigureAwait(false);
 
-        var json = ExtractJson(response.Content);
+        var json = response.Content;
         try
         {
-            return JsonSerializer.Deserialize<T>(json, JsonOptions)
+            json = ExtractJson(response.Content);
+            return JsonSerializer.Deserialize<T>(json, StructuredJsonOptions)
                 ?? throw new PolyAIException($"Provider {ProviderName} returned null when deserializing {typeof(T).Name}.");
         }
         catch (JsonException ex)
@@ -112,8 +118,7 @@ internal abstract class ProviderBase : IPolyAIClient
 
         if (statusCode is 429)
         {
-            TimeSpan? retryAfter = null;
-            if (response.Headers.RetryAfter?.Delta is { } delta) retryAfter = delta;
+            var retryAfter = ParseRetryAfter(response.Headers.RetryAfter, DateTimeOffset.UtcNow);
             throw new ProviderRateLimitException(ProviderName, $"{context}: rate limit exceeded.", retryAfter);
         }
 
@@ -146,17 +151,48 @@ internal abstract class ProviderBase : IPolyAIClient
         }
     }
 
+    internal static TimeSpan? ParseRetryAfter(System.Net.Http.Headers.RetryConditionHeaderValue? value, DateTimeOffset now)
+    {
+        if (value?.Delta is { } delta) return delta < TimeSpan.Zero ? TimeSpan.Zero : delta;
+        if (value?.Date is not { } date) return null;
+
+        var remaining = date - now;
+        return remaining <= TimeSpan.Zero ? TimeSpan.Zero : remaining;
+    }
+
     private static string ExtractJson(string text)
     {
         var trimmed = text.Trim();
-        // Strip markdown code fences if present
-        if (trimmed.StartsWith("```", StringComparison.Ordinal))
+        // A valid raw JSON value wins before considering Markdown. This prevents JSON string
+        // values containing backticks or fence-like text from being reinterpreted as Markdown.
+        if (IsCompleteJson(trimmed)) return trimmed;
+
+        // Count only complete delimiter lines. Triple backticks in prose or in a JSON string
+        // are content; a second fenced section (including an unrecognized language) is not.
+        var delimiterLines = System.Text.RegularExpressions.Regex.Matches(
+            trimmed,
+            "(?m)^[ \\t]*```[^\\r\\n]*\\r?$",
+            System.Text.RegularExpressions.RegexOptions.None);
+        if (delimiterLines.Count != 2)
+            throw new JsonException("Expected exactly one recognized fenced JSON payload.");
+
+        var matches = System.Text.RegularExpressions.Regex.Matches(
+            trimmed,
+            "(?m)^[ \\t]*```(?:json)?[ \\t]*\\r?\\n(?<payload>[\\s\\S]*?)\\r?\\n^[ \\t]*```[ \\t]*\\r?$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        if (matches.Count == 1)
         {
-            var firstNewline = trimmed.IndexOf('\n');
-            if (firstNewline >= 0) trimmed = trimmed[(firstNewline + 1)..];
-            if (trimmed.EndsWith("```", StringComparison.Ordinal))
-                trimmed = trimmed[..^3].TrimEnd();
+            var payload = matches[0].Groups["payload"].Value.Trim();
+            if (!string.IsNullOrEmpty(payload) && IsCompleteJson(payload)) return payload;
         }
-        return trimmed;
+
+        throw new JsonException("Expected one complete raw JSON value or one recognized fenced JSON payload.");
+    }
+
+    private static bool IsCompleteJson(string value)
+    {
+        try { using var _ = JsonDocument.Parse(value); return true; }
+        catch (JsonException) { return false; }
     }
 }
