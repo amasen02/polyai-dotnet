@@ -5,14 +5,13 @@
 
 
 [![CI](https://github.com/amasen02/polyai-dotnet/actions/workflows/ci.yml/badge.svg)](https://github.com/amasen02/polyai-dotnet/actions/workflows/ci.yml)
-[![NuGet](https://img.shields.io/nuget/v/PolyAI.DotNet.svg)](https://www.nuget.org/packages/PolyAI.DotNet)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
 
-> **Lightweight multi-provider AI SDK for ASP.NET Core.** One interface. Five providers. Zero framework lock-in.
+> **Multi-provider AI SDK for ASP.NET Core.** One interface with adapters for OpenAI, Anthropic, Google Gemini, Ollama, and Azure OpenAI.
 
-Semantic Kernel is a 28 000-line orchestration framework. `Microsoft.Extensions.AI` is just interfaces with no implementation. PolyAI.DotNet is the missing middle: a single 20 kB NuGet package that wires five AI providers into ASP.NET Core's DI container in two lines of code, with first-class streaming, typed structured output, and attribute-based tool/function calling — no Semantic Kernel dependency.
+PolyAI.DotNet integrates its providers with ASP.NET Core dependency injection and supports streaming, typed structured output, and attribute-based tool/function calling. It does not depend on Semantic Kernel.
 
 ## Supported providers
 
@@ -26,16 +25,24 @@ Semantic Kernel is a 28 000-line orchestration framework. `Microsoft.Extensions.
 
 ## Quickstart
 
-### Install
+### Build from source and use a local package
+
+PolyAI.DotNet is not currently published on NuGet. Build a package from this checkout, then add it from the local output directory:
 
 ```bash
-dotnet add package PolyAI.DotNet
+dotnet pack src/PolyAI/PolyAI.csproj -c Release -o ./artifacts
+dotnet new web -o PolyAIDemo
+cd PolyAIDemo
+dotnet add package PolyAI.DotNet --source ../artifacts
+dotnet build
 ```
 
 ### Register
 
 ```csharp
 // Program.cs (ASP.NET Core / Generic Host)
+using PolyAI.Extensions;
+
 builder.Services.AddPolyAI(o => o
     .UseAnthropic(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")!)
     .UseOpenAI(Environment.GetEnvironmentVariable("OPENAI_API_KEY")!)
@@ -275,18 +282,6 @@ dotnet test
 - **Security:** vulnerabilities acknowledged within 48 hours. See [SECURITY.md](SECURITY.md).
 - **Code of Conduct:** [Contributor Covenant 2.1](CODE_OF_CONDUCT.md).
 - **Reproducible CI:** green build required before any merge.
-
-## Comparison
-
-| | PolyAI.DotNet | Semantic Kernel | Microsoft.Extensions.AI |
-|---|---|---|---|
-| Package size | ~20 kB | ~2.5 MB | ~30 kB (interfaces only) |
-| DI integration | ✅ Built-in | ✅ | ✅ |
-| Streaming | ✅ `IAsyncEnumerable<string>` | ✅ | Partial |
-| Structured output | ✅ `StructuredAsync<T>()` | Via plugins | ❌ |
-| Tool calling | ✅ `[PolyAITool]` attributes | Via `KernelFunction` | ❌ |
-| Providers in one package | 5 | Many (separate packages) | 0 (you wire them) |
-| Learning curve | Low | High | Medium |
 
 ## Author
 

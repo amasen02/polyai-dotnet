@@ -65,6 +65,22 @@ jobs:
         run: dotnet restore
       - name: Pack
         run: dotnet pack src/PolyAI/PolyAI.csproj --no-restore -c Release -o ./artifacts
+      - name: Compile an isolated local-package consumer
+        shell: bash
+        run: |
+          consumer_dir="$(mktemp -d)"
+          dotnet new console --framework net9.0 --output "$consumer_dir" --name PolyAI.PackageConsumer --no-restore
+          dotnet add "$consumer_dir/PolyAI.PackageConsumer.csproj" package PolyAI.DotNet --version 1.0.0 --source "$GITHUB_WORKSPACE/artifacts" --no-restore
+          cat > "$consumer_dir/Program.cs" <<'EOF'
+          using Microsoft.Extensions.DependencyInjection;
+          using PolyAI.Extensions;
+
+          var services = new ServiceCollection();
+          services.AddPolyAI(options => options.UseOllama());
+          Console.WriteLine("PolyAI local package consumer compiled.");
+          EOF
+          dotnet restore "$consumer_dir" --source "$GITHUB_WORKSPACE/artifacts" --source https://api.nuget.org/v3/index.json
+          dotnet build "$consumer_dir" --no-restore -warnaserror
       - name: Upload package artifact
         uses: actions/upload-artifact@v7
         with:
